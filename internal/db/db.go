@@ -71,9 +71,11 @@ type Database interface {
 func Open(config models.ConnectionConfig) (Database, error) {
 	switch config.Type {
 	case "sqlite":
-		return NewSQLiteDB(config), nil
+		db := NewSQLiteDB()
+		return db, db.Connect(config)
 	case "postgres":
-		return NewPostgresDB(config), nil
+		db := NewPostgresDB()
+		return db, db.Connect(config)
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", config.Type)
 	}
