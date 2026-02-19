@@ -26,7 +26,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/yourusername/tornado/internal/app"
+	"github.com/jupiterozeye/tornado/internal/app"
 )
 
 func main() {

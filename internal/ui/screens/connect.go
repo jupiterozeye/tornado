@@ -37,8 +37,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/yourusername/tornado/internal/models"
-	"github.com/yourusername/tornado/internal/ui/styles"
+	"github.com/jupiterozeye/tornado/internal/models"
+	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // ConnectModel is the model for the connection screen.

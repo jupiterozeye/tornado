@@ -37,10 +37,10 @@ package app
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/yourusername/tornado/internal/db"
-	"github.com/yourusername/tornado/internal/models"
-	"github.com/yourusername/tornado/internal/ui/screens"
-	"github.com/yourusername/tornado/internal/ui/styles"
+	"github.com/jupiterozeye/tornado/internal/db"
+	"github.com/jupiterozeye/tornado/internal/models"
+	"github.com/jupiterozeye/tornado/internal/ui/screens"
+	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // Screen represents the different views/modes of the application.

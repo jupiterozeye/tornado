@@ -22,7 +22,7 @@
 package db
 
 import (
-	"github.com/yourusername/tornado/internal/models"
+	"github.com/jupiterozeye/tornado/internal/models"
 )
 
 // Database defines the common interface for all database backends.

@@ -41,9 +41,9 @@ package screens
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/yourusername/tornado/internal/db"
-	"github.com/yourusername/tornado/internal/models"
-	"github.com/yourusername/tornado/internal/ui/styles"
+	"github.com/jupiterozeye/tornado/internal/db"
+	"github.com/jupiterozeye/tornado/internal/models"
+	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // BrowserModel is the model for the database browser screen.

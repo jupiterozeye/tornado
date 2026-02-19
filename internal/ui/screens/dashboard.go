@@ -52,10 +52,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"time"
 
-	"github.com/yourusername/tornado/internal/db"
-	"github.com/yourusername/tornado/internal/models"
-	"github.com/yourusername/tornado/internal/telemetry"
-	"github.com/yourusername/tornado/internal/ui/styles"
+	"github.com/jupiterozeye/tornado/internal/db"
+	"github.com/jupiterozeye/tornado/internal/models"
+	"github.com/jupiterozeye/tornado/internal/telemetry"
+	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // DashboardModel is the model for the dashboard/monitoring screen.

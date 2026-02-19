@@ -42,7 +42,7 @@ package db
 import (
 	"database/sql"
 
-	"github.com/yourusername/tornado/internal/models"
+	"github.com/jupiterozeye/tornado/internal/models"
 )
 
 // SQLiteDB implements the Database interface for SQLite databases.
