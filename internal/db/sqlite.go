@@ -17,10 +17,8 @@ import (
 type SQLiteDB struct {
 	// db is the connection pool to the SQLite database
 	db *sql.DB
-
 	// path is the file path to the SQLite database
 	path string
-
 	// connected tracks whether we have an active connection
 	connected bool
 }
@@ -121,7 +119,9 @@ func (s *SQLiteDB) Exec(sql string) (*models.ExecResult, error) {
 		return nil, fmt.Errorf("not connected to database")
 	}
 
+	// Begin timer
 	start := time.Now()
+	// Execute SQL
 	result, err := s.db.Exec(sql)
 	if err != nil {
 		return nil, err
@@ -129,6 +129,7 @@ func (s *SQLiteDB) Exec(sql string) (*models.ExecResult, error) {
 	rowsAffected, _ := result.RowsAffected()
 	lastInsertId, _ := result.LastInsertId()
 
+	// Return result
 	return &models.ExecResult{
 		RowsAffected:  rowsAffected,
 		LastInsertID:  lastInsertId,
@@ -142,6 +143,7 @@ func (s *SQLiteDB) ListTables() ([]string, error) {
 	if !s.connected || s.db == nil {
 		return nil, fmt.Errorf("not connected to database")
 	}
+	// Run query
 	rows, err := s.db.Query(`
 			SELECT name FROM sqlite_master
 			WHERE type='table' AND name NOT LIKE 'sqlite_%'
@@ -152,6 +154,7 @@ func (s *SQLiteDB) ListTables() ([]string, error) {
 	defer rows.Close()
 
 	var tables []string
+	// Populate list with tables
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
@@ -160,6 +163,7 @@ func (s *SQLiteDB) ListTables() ([]string, error) {
 		tables = append(tables, name)
 	}
 
+	// Return the tables
 	return tables, rows.Err()
 }
 
