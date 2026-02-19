@@ -35,11 +35,13 @@
 package app
 
 import (
+	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jupiterozeye/tornado/internal/db"
-	// "github.com/jupiterozeye/tornado/internal/models" // TODO: uncomment when implementing
-	// "github.com/jupiterozeye/tornado/internal/ui/screens" // TODO: uncomment when implementing
+	"github.com/jupiterozeye/tornado/internal/models"
+	"github.com/jupiterozeye/tornado/internal/ui/screens"
+	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // Screen represents the different views/modes of the application.
@@ -59,66 +61,49 @@ const (
 )
 
 // String returns a human-readable name for the screen.
-// TODO: Implement this for debugging/logging purposes.
 func (s Screen) String() string {
-	// TODO: Return string representation
-	return ""
+	switch s {
+	case ScreenConnect:
+		return "Connect"
+	case ScreenBrowser:
+		return "Browser"
+	case ScreenQuery:
+		return "Query"
+	case ScreenDashboard:
+		return "Dashboard"
+	default:
+		return "Unknown"
+	}
 }
 
 // App is the root model of the application.
 // It manages screen navigation and holds global state.
-//
-// TODO: Add fields for:
-//   - Current database connection (db.Database interface)
-//   - Current active screen
-//   - Screen models (connect, browser, query, dashboard)
-//   - Global styles reference
-//   - Window dimensions (for responsive layouts)
-//   - Error state (for global error display)
 type App struct {
-	// TODO: Add these fields
-	// currentScreen   Screen
-	// width           int
-	// height          int
-	// db              db.Database
-	// styles          *styles.Styles
-	//
+	currentScreen Screen
+	width         int
+	height        int
+	db            db.Database
+	styles        *styles.Styles
+
 	// Screen models - each is a separate Bubble Tea model
-	// connectScreen   *screens.ConnectModel
-	// browserScreen   *screens.BrowserModel
-	// queryScreen     *screens.QueryModel
-	// dashboardScreen *screens.DashboardModel
+	connectScreen   *screens.ConnectModel
+	browserScreen   *screens.BrowserModel
+	queryScreen     *screens.QueryModel
+	dashboardScreen *screens.DashboardModel
 }
 
 // New creates a new App instance with default values.
-// This is the "initial model" in Elm Architecture terms.
-//
-// TODO: Initialize all screens with their default state
-// TODO: Load styles from styles package
-// TODO: Accept optional configuration from main()
 func New() *App {
 	return &App{
-		// TODO: Initialize fields
+		currentScreen: ScreenConnect,
+		styles:        styles.Default(),
+		connectScreen: screens.NewConnectModel(),
 	}
 }
 
 // Init returns the initial command for the application.
-// This is called once when the program starts.
-//
-// Common patterns:
-//   - Return nil if no initial I/O is needed
-//   - Return tea.Batch(screen1.Init(), screen2.Init()) to init multiple things
-//   - Return a command that loads config or checks for database files
-//
-// TODO: Decide what should happen on startup:
-//   - Show connect screen immediately? (return nil)
-//   - Try to reconnect to last database? (return reconnect command)
-//   - Check for update? (return version check command)
 func (a *App) Init() tea.Cmd {
-	// TODO: Return appropriate initialization commands
-	// Example: Initialize the connect screen
-	// return a.connectScreen.Init()
-	return nil
+	return a.connectScreen.Init()
 }
 
 // Update handles incoming messages and updates the model accordingly.
@@ -127,50 +112,76 @@ func (a *App) Init() tea.Cmd {
 //   - Screen transition messages
 //   - Window resize events
 //   - Messages from child screens
-//
-// Key Learning - Message Handling:
-//
-//	Messages can be any type! Common patterns:
-//	- tea.KeyMsg: Keyboard input
-//	- tea.WindowSizeMsg: Terminal resize
-//	- Custom messages: Your own structs for app-specific events
-//
-// TODO: Implement message handling:
-//   - [ ] Handle tea.KeyMsg for global shortcuts (q to quit)
-//   - [ ] Handle tea.WindowSizeMsg to update dimensions
-//   - [ ] Handle custom ScreenChangeMsg for navigation
-//   - [ ] Delegate to active screen's Update for screen-specific messages
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// TODO: Type switch on msg to handle different message types
-	//
-	// switch msg := msg.(type) {
-	// case tea.KeyMsg:
-	//     // Handle global keybindings
-	//     if msg.String() == "q" || msg.String() == "ctrl+c" {
-	//         return a, tea.Quit
-	//     }
-	//
-	// case tea.WindowSizeMsg:
-	//     // Update dimensions and propagate to screens
-	//     a.width = msg.Width
-	//     a.height = msg.Height
-	//
-	// case ScreenChangeMsg:
-	//     // Handle screen transitions
-	//     a.currentScreen = msg.Screen
-	//     return a, a.activeScreen().Init()
-	// }
-	//
-	// // Delegate to active screen
-	// switch a.currentScreen {
-	// case ScreenConnect:
-	//     return a.connectScreen.Update(msg)
-	// case ScreenBrowser:
-	//     return a.browserScreen.Update(msg)
-	// // ... etc
-	// }
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return a, tea.Quit
+		case "tab":
+			a.switchToNextScreen()
+			return a, nil
+		}
+	case tea.WindowSizeMsg:
+		// Store dimensions for responsive lasyout
+		a.width = msg.Width
+		a.height = msg.Height
+		// Propagate to active screen
+		return a.delegateToActiveScreen(msg)
+
+	case ConnectSuccessMsg:
+		// Initialize other screens now that we have DB
+		a.db = msg.DB
+		a.browserScreen = screens.NewBrowserModel(a.db)
+		a.queryScreen = screens.NewQueryModel(a.db)
+		a.dashboardScreen = screens.NewDashboardModel(a.db)
+		a.currentScreen = ScreenBrowser
+		return a, a.browserScreen.Init()
+
+	case ScreenChangeMsg:
+		// custom message for explicit screen switching
+		a.currentScreen = msg.Screen
+		return a, a.getActiveScreen().Init()
+
+	default:
+		// Pass all other messages to current screen
+		return a.delegateToActiveScreen(msg)
+	}
 
 	return a, nil
+}
+
+// Helper methods
+
+func (a *App) switchToNextScreen() {
+	switch a.currentScreen {
+	case ScreenConnect:
+		// Cant switch from connect until connected
+		return
+	case ScreenBrowser:
+		a.currentScreen = ScreenQuery
+	case ScreenQuery:
+		a.currentScreen = ScreenDashboard
+	case ScreenDashboard:
+		a.currentScreen = ScreenBrowser
+	}
+}
+
+func (a *App) getActiveScreen() tea.Model {
+	switch a.currentScreen {
+	case ScreenConnect:
+		return a.connectScreen
+	case ScreenQuery:
+		return a.queryScreen
+	case ScreenDashboard:
+		return a.dashboardScreen
+	default:
+		return a.connectScreen
+	}
+}
+
+func (a *App) delegateToActiveScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
+
 }
 
 // View renders the current state of the application.
