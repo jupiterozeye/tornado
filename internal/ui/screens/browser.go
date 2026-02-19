@@ -43,7 +43,6 @@ import (
 
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"
-	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // BrowserModel is the model for the database browser screen.

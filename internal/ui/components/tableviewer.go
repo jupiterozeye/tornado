@@ -29,10 +29,8 @@ package components
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jupiterozeye/tornado/internal/models"
-	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // TableViewer is a reusable component for displaying tabular data.

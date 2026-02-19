@@ -120,6 +120,32 @@ type Column struct {
 	ForeignKeyColumn string
 }
 
+// TableSchema represents the structure of a database table.
+// Returned by DescribeTable method of Database interface.
+type TableSchema struct {
+	// Name is the table name
+	Name string
+
+	// Columns is the list of columns in the table
+	Columns []Column
+
+	// PrimaryKey is the name of the primary key column(s)
+	PrimaryKey []string
+
+	// Indexes contains information about table indexes
+	Indexes []IndexInfo
+
+	// RowCount is an estimate of the number of rows
+	RowCount int64
+}
+
+// IndexInfo represents information about a database index.
+type IndexInfo struct {
+	Name    string
+	Columns []string
+	Unique  bool
+}
+
 // QueryHistoryItem represents a single entry in query history.
 // Useful for the query editor to show previous queries.
 //

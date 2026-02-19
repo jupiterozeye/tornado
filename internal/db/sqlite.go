@@ -40,7 +40,6 @@
 package db
 
 import (
-	"database/sql"
 
 	"github.com/jupiterozeye/tornado/internal/models"
 )

@@ -38,9 +38,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jupiterozeye/tornado/internal/db"
-	"github.com/jupiterozeye/tornado/internal/models"
-	"github.com/jupiterozeye/tornado/internal/ui/screens"
-	"github.com/jupiterozeye/tornado/internal/ui/styles"
+	// "github.com/jupiterozeye/tornado/internal/models" // TODO: uncomment when implementing
+	// "github.com/jupiterozeye/tornado/internal/ui/screens" // TODO: uncomment when implementing
 )
 
 // Screen represents the different views/modes of the application.

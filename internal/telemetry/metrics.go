@@ -17,8 +17,10 @@
 package telemetry
 
 import (
+	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jupiterozeye/tornado/internal/models"
@@ -246,16 +248,20 @@ func FormatDuration(d time.Duration) string {
 
 // formatFloat formats a float with specified decimal places.
 func formatFloat(f float64, decimals int) string {
-	format := "%." + string(rune('0'+decimals)) + "f"
-	return trimZeros(sprintf(format, f))
-}
-
-func sprintf(format string, a ...interface{}) string {
-	return format // Simplified - use fmt.Sprintf in real code
+	format := fmt.Sprintf("%%.%df", decimals)
+	s := fmt.Sprintf(format, f)
+	return trimZeros(s)
 }
 
 func trimZeros(s string) string {
-	// TODO: Implement proper zero trimming
+	// Remove trailing zeros after decimal point
+	if !strings.Contains(s, ".") {
+		return s
+	}
+	s = strings.TrimRight(s, "0")
+	if strings.HasSuffix(s, ".") {
+		s = s[:len(s)-1]
+	}
 	return s
 }
 
@@ -314,36 +320,6 @@ func (l *LatencyBuckets) ToSlice() []int {
 // Labels returns bucket labels for charting.
 func (l *LatencyBuckets) Labels() []string {
 	return []string{"Quick", "Medium", "Slow", "V.Slow"}
-}
-
-// Math helper functions
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minFloat(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // clamp ensures a value is within bounds.

@@ -40,9 +40,7 @@ package components
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // Sidebar is a navigation component for browsing database objects.
@@ -75,10 +73,10 @@ type Sidebar struct {
 // TableItem represents a table in the sidebar list.
 // Implements list.Item interface from bubbles.
 type TableItem struct {
-	Name        string
-	Type        string // "table", "view", "index"
-	RowCount    int
-	Description string
+	Name     string
+	Type     string // "table", "view", "index"
+	RowCount int
+	Desc     string // description (renamed to avoid conflict with Description method)
 }
 
 // FilterValue implements list.Item interface for filtering.
@@ -93,7 +91,7 @@ func (t TableItem) Title() string {
 
 // Description implements list.DefaultItem interface.
 func (t TableItem) Description() string {
-	return t.Type
+	return t.Desc
 }
 
 // NewSidebar creates a new sidebar component.

@@ -30,8 +30,9 @@
 package telemetry
 
 import (
-	"context"
 	"time"
+
+	"github.com/charmbracelet/bubbletea"
 
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"

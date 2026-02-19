@@ -54,8 +54,7 @@ import (
 
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"
-	"github.com/jupiterozeye/tornado/internal/telemetry"
-	"github.com/jupiterozeye/tornado/internal/ui/styles"
+	// "github.com/jupiterozeye/tornado/internal/telemetry" // TODO: uncomment when implementing collector
 )
 
 // DashboardModel is the model for the dashboard/monitoring screen.

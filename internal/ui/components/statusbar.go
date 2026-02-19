@@ -7,11 +7,12 @@
 //   - Error messages
 //
 // Layout (envisioned):
-//   ┌─────────────────────────────────────────────────────────────────┐
-//   │ ... main content ...                                            │
-//   ├─────────────────────────────────────────────────────────────────┤
-//   │ 🗄️ mydb.db │ Browser │ 123 rows │ [q]uit [?]help [r]efresh    │
-//   └─────────────────────────────────────────────────────────────────┘
+//
+//	┌─────────────────────────────────────────────────────────────────┐
+//	│ ... main content ...                                            │
+//	├─────────────────────────────────────────────────────────────────┤
+//	│ 🗄️ mydb.db │ Browser │ 123 rows │ [q]uit [?]help [r]efresh    │
+//	└─────────────────────────────────────────────────────────────────┘
 //
 // TODO: Implement the status bar:
 //   - [ ] Define StatusBar struct
@@ -23,17 +24,17 @@
 //   - [ ] Add loading indicator
 //
 // Key Learning - Passive Components:
-//   Some components only display data and don't handle input.
-//   They still implement the tea.Model interface but Update just returns.
+//
+//	Some components only display data and don't handle input.
+//	They still implement the tea.Model interface but Update just returns.
 //
 // References:
 //   - https://github.com/charmbracelet/lipgloss#joining
 package components
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // StatusBar displays application status at the bottom of the screen.
@@ -94,9 +95,10 @@ func (s *StatusBar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 //
 // TODO: Implement status bar layout
 // Structure:
-//   [Connection] | [Screen] | [Info] | [Keybindings]
-//   If error: show error in red
-//   If loading: show spinner
+//
+//	[Connection] | [Screen] | [Info] | [Keybindings]
+//	If error: show error in red
+//	If loading: show spinner
 func (s *StatusBar) View() string {
 	// TODO: Build status bar with lipgloss.JoinHorizontal
 	//
@@ -187,6 +189,3 @@ func (s *StatusBar) renderError() string {
 	// Show error in red box above status bar
 	return ""
 }
-
-// Import tea for the Model interface
-import "github.com/charmbracelet/bubbletea"
