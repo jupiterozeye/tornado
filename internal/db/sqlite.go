@@ -40,8 +40,10 @@
 package db
 
 import (
-
+	"database/sql"
+	"fmt"
 	"github.com/jupiterozeye/tornado/internal/models"
+	_ "modernc.org/sqlite"
 )
 
 // SQLiteDB implements the Database interface for SQLite databases.
@@ -53,83 +55,58 @@ import (
 //   - Prepared statement cache (optional optimization)
 type SQLiteDB struct {
 	// db is the connection pool to the SQLite database
-	// TODO: Add this field
-	// db *sql.DB
+	db *sql.DB
 
 	// path is the file path to the SQLite database
-	// TODO: Add this field for display in UI
-	// path string
+	path string
 
 	// connected tracks whether we have an active connection
-	// TODO: Consider if this is needed or if db != nil is sufficient
-	// connected bool
+	connected bool
 }
 
 // NewSQLiteDB creates a new SQLiteDB instance.
 // Note: This doesn't connect yet - call Connect() to open the database.
-//
-// TODO: Implement constructor
 func NewSQLiteDB() *SQLiteDB {
 	return &SQLiteDB{}
 }
 
 // Connect opens the SQLite database file.
-//
-// Key Learning - SQL Driver Registration:
-//   - Importing github.com/mattn/go-sqlite3 registers the "sqlite3" driver
-//   - sql.Open("sqlite3", path) creates a connection pool
-//   - The returned *sql.DB is safe for concurrent use
-//
-// TODO: Implement Connect method
-// Steps:
-//  1. Parse connection config for file path
-//  2. Call sql.Open("sqlite3", path)
-//  3. Ping to verify connection works
-//  4. Store connection in SQLiteDB struct
-//
 // SQLite-specific considerations:
 //   - If file doesn't exist, SQLite creates it (may want to check first)
 //   - Use "_journal_mode=WAL" in DSN for better concurrency
 //   - Use "_foreign_keys=on" to enable FK constraints
 func (s *SQLiteDB) Connect(config models.ConnectionConfig) error {
-	// TODO: Implement
-	//
-	// Example:
-	// db, err := sql.Open("sqlite3", config.Path)
-	// if err != nil {
-	//     return fmt.Errorf("failed to open database: %w", err)
-	// }
-	//
-	// // Verify connection works
-	// if err := db.Ping(); err != nil {
-	//     return fmt.Errorf("failed to connect to database: %w", err)
-	// }
-	//
-	// s.db = db
-	// s.path = config.Path
-	// s.connected = true
-	// return nil
+	db, err := sql.Open("sqlite3", config.Path)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
 
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	s.db = db
+	s.path = config.Path
+	s.connected = true
 	return nil
 }
 
 // Disconnect closes the SQLite database connection.
-//
-// TODO: Implement Disconnect method
 func (s *SQLiteDB) Disconnect() error {
-	// TODO: Implement
-	// if s.db != nil {
-	//     return s.db.Close()
-	// }
+	if s.db != nil {
+		return s.db.Close()
+	}
 	return nil
 }
 
 // IsConnected returns whether there's an active connection.
-//
-// TODO: Implement IsConnected method
 func (s *SQLiteDB) IsConnected() bool {
-	// TODO: Implement
-	return false
+	switch s.connected {
+	case true:
+		return true
+	default:
+		return false
+	}
 }
 
 // Query executes a SELECT query and returns results.
@@ -152,8 +129,52 @@ func (s *SQLiteDB) IsConnected() bool {
 //   - Large result sets (consider pagination)
 //   - Query timeouts
 func (s *SQLiteDB) Query(sql string) (*models.QueryResult, error) {
-	// TODO: Implement
-	return nil, nil
+	// Execute query
+	rows, err := s.db.Query(sql)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Get column metadata
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	columnTypes, err := rows.ColumnTypes()
+
+	// Extract type names for the result
+	typeNames := make([]string, len(columnTypes))
+	for i, ct := range columnTypes {
+		typeNames[i] = ct.DatabaseTypeName()
+	}
+	// Prepare result container
+	var results [][]any
+
+	// Iterate rows
+	for rows.Next() {
+		// Create a slice of pointer to scan into
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		// Scan row data
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, err
+		}
+
+		results = append(results, values)
+
+	}
+	return &models.QueryResult{
+		Columns:     columns,
+		ColumnTypes: typeNames,
+		Rows:        results,
+		RowCount:    len(results),
+		Query:       sql,
+	}, nil
 }
 
 // Exec executes a statement that doesn't return rows.

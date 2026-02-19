@@ -1,20 +1,6 @@
-// Package db provides database abstraction for Tornado.
-//
 // This package defines a common interface for database operations, allowing
 // Tornado to work with multiple database backends (SQLite, PostgreSQL, etc.)
 // without the UI code needing to know which database is being used.
-//
-// This is a key Go concept: PROGRAMMING TO INTERFACES
-// By defining behaviors in an interface, we can swap implementations easily.
-//
-// Key Learning - Interfaces in Go:
-//   - Interfaces are implicit (no "implements" keyword)
-//   - An interface is a set of method signatures
-//   - Any type that has those methods satisfies the interface
-//   - This enables dependency injection and testing with mocks
-//
-// TODO: Define the Database interface with all necessary operations
-// TODO: Create mock implementation for testing UI without real DB
 //
 // References:
 //   - https://go.dev/tour/methods/9 (Interfaces)
@@ -22,6 +8,8 @@
 package db
 
 import (
+	"fmt"
+
 	"github.com/jupiterozeye/tornado/internal/models"
 )
 
@@ -55,20 +43,10 @@ type Database interface {
 
 	// Query executes a SQL query and returns the results.
 	// Used for SELECT statements and any custom SQL the user writes.
-	//
-	// TODO: Define what QueryResult contains:
-	// - Column names
-	// - Row data (as [][]any or map[string]any)
-	// - Row count
-	// - Execution time
 	Query(sql string) (*models.QueryResult, error)
 
 	// Exec executes a SQL statement that doesn't return rows.
 	// Used for INSERT, UPDATE, DELETE, CREATE, etc.
-	//
-	// TODO: Define ExecResult:
-	// - Rows affected
-	// - Last insert ID (if applicable)
 	Exec(sql string) (*models.ExecResult, error)
 
 	// ListTables returns a list of all user tables in the database.
@@ -90,25 +68,13 @@ type Database interface {
 
 // Open creates a new database connection based on the config type.
 // This is a factory function that returns the appropriate implementation.
-//
-// Key Learning - Factory Pattern:
-//   - The caller doesn't need to know which implementation to create
-//   - Centralized logic for choosing the right database driver
-//
-// TODO: Implement this factory function
-// Example implementation:
-//
-//	func Open(config models.ConnectionConfig) (Database, error) {
-//	    switch config.Type {
-//	    case "sqlite":
-//	        return NewSQLiteDB(config), nil
-//	    case "postgres":
-//	        return NewPostgresDB(config), nil
-//	    default:
-//	        return nil, fmt.Errorf("unsupported database type: %s", config.Type)
-//	    }
-//	}
 func Open(config models.ConnectionConfig) (Database, error) {
-	// TODO: Implement factory logic
-	return nil, nil
+	switch config.Type {
+	case "sqlite":
+		return NewSQLiteDB(config), nil
+	case "postgres":
+		return NewPostgresDB(config), nil
+	default:
+		return nil, fmt.Errorf("unsupported database type: %s", config.Type)
+	}
 }
