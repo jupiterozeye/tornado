@@ -1,0 +1,24 @@
+[37m# Binaries[0m
+[37mbin/[0m
+[37m*.exe[0m
+[37m*.exe~[0m
+[37m*.dll[0m
+[37m*.so[0m
+[37m*.dylib[0m
+[37m# Test binary, built with `go test -c`[0m
+[37m*.test[0m
+[37m# Output of go coverage[0m
+[37m*.out[0m
+[37m# Dependency directories[0m
+[37mvendor/[0m
+[37m# IDE[0m
+[37m.idea/[0m
+[37m.vscode/[0m
+[37m*.swp[0m
+[37m*.swo[0m
+[37m# Debug logs[0m
+[37mdebug.log[0m
+[37m# Database files (for testing)[0m
+[37m*.db[0m
+[37m*.sqlite[0m
+[37m*.sqlite3[0m
