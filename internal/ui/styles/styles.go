@@ -1,22 +1,7 @@
-// Package styles defines all visual styling for Tornado using Lip Gloss.
-//
 // This file centralizes all style definitions, making it easy to:
 //   - Maintain consistent look and feel across the application
 //   - Implement themes (dark/light mode)
 //   - Change colors/sizing in one place
-//
-// Key Learning - Styling with Lip Gloss:
-//   - lipgloss.NewStyle() creates a style
-//   - Chain methods like .Foreground().Background().Padding()
-//   - Call .Render("text") to apply the style
-//   - Use lipgloss.JoinHorizontal/JoinVertical for layout
-//
-// TODO: Define all application styles:
-//   - [ ] Color palette (primary, secondary, accent, error, success)
-//   - [ ] Text styles (title, header, body, muted, error)
-//   - [ ] Component styles (input, button, table, sidebar)
-//   - [ ] Layout helpers (padding, margins, borders)
-//   - [ ] Adaptive colors for light/dark terminal backgrounds
 //
 // References:
 //   - https://github.com/charmbracelet/lipgloss
@@ -27,10 +12,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Color definitions using ANSI 256 color codes.
-// These provide a good balance of compatibility and aesthetics.
-// TODO: Adjust colors to match your preferred aesthetic
-// TODO: Consider using lipgloss.AdaptiveColor for light/dark backgrounds
 var (
 	// Primary colors - main application accent
 	Primary   = lipgloss.Color("99") // Purple
@@ -65,68 +46,71 @@ var (
 )
 
 // Styles holds all pre-defined styles for the application.
-// TODO: Add more styles as needed for components
 type Styles struct {
-	// TODO: Add style fields
-	//
 	// ===== Title and Headers =====
-	// Title      lipgloss.Style
-	// Header     lipgloss.Style
-	// Subheader  lipgloss.Style
-	//
+	Title     lipgloss.Style
+	Header    lipgloss.Style
+	Subheader lipgloss.Style
+
 	// ===== Text Styles =====
-	// Body       lipgloss.Style
-	// Muted      lipgloss.Style
-	// Bold       lipgloss.Style
-	// Error      lipgloss.Style
-	// Success    lipgloss.Style
-	//
+	Body    lipgloss.Style
+	Muted   lipgloss.Style
+	Bold    lipgloss.Style
+	Error   lipgloss.Style
+	Success lipgloss.Style
+
 	// ===== Component Styles =====
-	// Input      lipgloss.Style
-	// InputFocus lipgloss.Style
-	// Button     lipgloss.Style
-	// ButtonFocus lipgloss.Style
-	//
+	Input       lipgloss.Style
+	InputFocus  lipgloss.Style
+	Button      lipgloss.Style
+	ButtonFocus lipgloss.Style
+
 	// ===== Layout Styles =====
-	// Box        lipgloss.Style
-	// BoxFocus   lipgloss.Style
-	// Sidebar    lipgloss.Style
-	// StatusBar  lipgloss.Style
+	Box       lipgloss.Style
+	BoxFocus  lipgloss.Style
+	Sidebar   lipgloss.Style
+	StatusBar lipgloss.Style
 }
 
 // Default returns the default style set.
-// TODO: Initialize all styles with sensible defaults
 func Default() *Styles {
 	return &Styles{
-		// TODO: Initialize styles
-		// Example:
-		// Title: lipgloss.NewStyle().
-		//     Foreground(Primary).
-		//     Bold(true).
-		//     Padding(0, 1),
+		Title:       lipgloss.NewStyle().Foreground(Primary).Bold(true).Padding(0, 1),
+		Header:      lipgloss.NewStyle().Foreground(Secondary).Bold(true).Padding(0, 1),
+		Subheader:   lipgloss.NewStyle().Foreground(Accent).Bold(true).Padding(0, 1),
+		Body:        lipgloss.NewStyle().Foreground(Text).Padding(0, 1),
+		Muted:       lipgloss.NewStyle().Foreground(TextMuted).Padding(0, 1),
+		Bold:        lipgloss.NewStyle().Foreground(TextBold).Bold(true).Padding(0, 1),
+		Error:       lipgloss.NewStyle().Foreground(Error).Padding(0, 1),
+		Success:     lipgloss.NewStyle().Foreground(Success).Padding(0, 1),
+		Input:       lipgloss.NewStyle().Foreground(Text).Background(BgLight).Padding(0, 1),
+		InputFocus:  lipgloss.NewStyle().Foreground(Text).Background(BgLight).Border(lipgloss.NormalBorder()).BorderForeground(BorderFocus).Padding(0, 1),
+		Button:      lipgloss.NewStyle().Foreground(TextBold).Background(Secondary).Padding(0, 2),
+		ButtonFocus: lipgloss.NewStyle().Foreground(TextBold).Background(Primary).Padding(0, 2).Bold(true),
+		Box:         lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(Border).Padding(0, 1),
+		BoxFocus:    lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(BorderFocus).Padding(0, 1),
+		Sidebar:     lipgloss.NewStyle().Background(BgDark).Foreground(Text).Padding(0, 1),
+		StatusBar:   lipgloss.NewStyle().Background(BgLight).Foreground(TextMuted).Padding(0, 1),
 	}
 }
 
 // Theme styles (pre-defined style sets)
-// TODO: Implement multiple themes if desired
 
 // DarkTheme returns styles optimized for dark terminal backgrounds.
+// TODO: Implement dark theme
 func DarkTheme() *Styles {
 	return Default()
 }
 
 // LightTheme returns styles optimized for light terminal backgrounds.
-// TODO: Implement light theme with appropriate color adjustments
+// TODO: Implement light theme
 func LightTheme() *Styles {
 	return Default()
 }
 
 // Component style helpers
-// TODO: Add helper functions for common styling patterns
 
 // Box creates a bordered box style.
-//
-// TODO: Implement with customizable borders
 func Box(focused bool) lipgloss.Style {
 	borderColor := Border
 	if focused {
@@ -140,8 +124,6 @@ func Box(focused bool) lipgloss.Style {
 }
 
 // Input creates a style for text input fields.
-//
-// TODO: Implement with focus state
 func Input(focused bool) lipgloss.Style {
 	style := lipgloss.NewStyle().
 		Padding(0, 1).
@@ -156,8 +138,6 @@ func Input(focused bool) lipgloss.Style {
 }
 
 // Button creates a style for clickable buttons.
-//
-// TODO: Implement button styling
 func Button(focused bool) lipgloss.Style {
 	bg := Secondary
 	if focused {
@@ -172,8 +152,6 @@ func Button(focused bool) lipgloss.Style {
 }
 
 // Table creates styles for table components.
-//
-// TODO: Implement table header and cell styles
 func TableHeader() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Foreground(Primary).
