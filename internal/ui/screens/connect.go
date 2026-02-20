@@ -36,25 +36,14 @@ package screens
 import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jupiterozeye/tornado/internal/ui/styles"
-
 	"github.com/jupiterozeye/tornado/internal/models"
+	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // ConnectModel is the model for the connection screen.
 // It manages the connection form state and user input.
-//
-// TODO: Add form fields and state:
-//   - Database type selector
-//   - Connection input fields (different for SQLite vs Postgres)
-//   - Error display state
-//   - Loading/connecting state
 type ConnectModel struct {
-	// TODO: Add these fields
-	//
-	// ===== Form Fields =====
-	// Use bubbles/textinput for text inputs
-	//
+	// Form fields
 	dbTypeInput   textinput.Model // "sqlite" or "postgres"
 	pathInput     textinput.Model // SQLite file path
 	hostInput     textinput.Model // Postgres host
@@ -63,19 +52,19 @@ type ConnectModel struct {
 	passwordInput textinput.Model // Postgres password
 	databaseInput textinput.Model // Postgres database name
 
-	// ===== UI State =====
+	// UI state
 	focusIndex   int    // Which field is focused
 	isConnecting bool   // Currently attempting connection
 	error        string // Error message to display
 
-	// ===== Dimensions =====
+	// Dimensions
 	width  int
 	height int
 
-	// ===== Styling =====
+	// Styling
 	styles *styles.Styles
 
-	// ===== History =====
+	// History
 	recentConnections []models.ConnectionHistoryItem
 	showRecent        bool
 }
@@ -84,13 +73,53 @@ type ConnectModel struct {
 //
 // TODO: Initialize all form fields with appropriate defaults
 // TODO: Load recent connections from history
-func NewConnectModel() *ConnectModel {
+func NewConnectModel(s *styles.Styles) *ConnectModel {
+	// Initialize database type input
+	dbType := textinput.New()
+	dbType.Placeholder = "sqlite"
+	dbType.Focus()
+	dbType.CharLimit = 20
+
+	// Intialize SQLite path input
+	path := textinput.New()
+	path.Placeholder = "path/to/database.db"
+	path.CharLimit = 256
+
+	// Initialize Postgres fields
+	host := textinput.New()
+	host.Placeholder = "localhost"
+	host.CharLimit = 100
+
+	port := textinput.New()
+	port.Placeholder = "5432"
+	port.CharLimit = 10
+
+	user := textinput.New()
+	user.Placeholder = "username"
+	user.CharLimit = 50
+
+	password := textinput.New()
+	password.Placeholder = "password"
+	password.EchoMode = textinput.EchoPassword
+	password.CharLimit = 100
+
+	database := textinput.New()
+	database.Placeholder = "db_name"
+	database.CharLimit = 50
+
 	return &ConnectModel{
-		// TODO: Initialize fields
-		// Example for textinput:
-		// dbTypeInput: textinput.New()
-		// dbTypeInput.Placeholder = "sqlite or postgres"
-		// dbTypeInput.Focus()  // First field gets focus
+		dbTypeInput:   dbType,
+		pathInput:     path,
+		hostInput:     host,
+		portInput:     port,
+		userInput:     user,
+		passwordInput: password,
+		databaseInput: database,
+		focusIndex:    0,
+		isConnecting:  false,
+		error:         "",
+		showRecent:    false,
+		styles:        s,
 	}
 }
 
