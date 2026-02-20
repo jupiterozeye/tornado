@@ -34,7 +34,9 @@
 package screens
 
 import (
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jupiterozeye/tornado/internal/ui/styles"
 
 	"github.com/jupiterozeye/tornado/internal/models"
 )
@@ -53,29 +55,29 @@ type ConnectModel struct {
 	// ===== Form Fields =====
 	// Use bubbles/textinput for text inputs
 	//
-	// dbTypeInput    textinput.Model  // "sqlite" or "postgres"
-	// pathInput      textinput.Model  // SQLite file path
-	// hostInput      textinput.Model  // Postgres host
-	// portInput      textinput.Model  // Postgres port
-	// userInput      textinput.Model  // Postgres username
-	// passwordInput  textinput.Model  // Postgres password
-	// databaseInput  textinput.Model  // Postgres database name
-	//
+	dbTypeInput   textinput.Model // "sqlite" or "postgres"
+	pathInput     textinput.Model // SQLite file path
+	hostInput     textinput.Model // Postgres host
+	portInput     textinput.Model // Postgres port
+	userInput     textinput.Model // Postgres username
+	passwordInput textinput.Model // Postgres password
+	databaseInput textinput.Model // Postgres database name
+
 	// ===== UI State =====
-	// focusIndex     int              // Which field is focused
-	// isConnecting   bool             // Currently attempting connection
-	// error          string           // Error message to display
-	//
+	focusIndex   int    // Which field is focused
+	isConnecting bool   // Currently attempting connection
+	error        string // Error message to display
+
 	// ===== Dimensions =====
-	// width          int
-	// height         int
-	//
+	width  int
+	height int
+
 	// ===== Styling =====
-	// styles         *styles.Styles
-	//
+	styles *styles.Styles
+
 	// ===== History =====
-	// recentConnections []models.ConnectionHistoryItem
-	// showRecent        bool
+	recentConnections []models.ConnectionHistoryItem
+	showRecent        bool
 }
 
 // NewConnectModel creates a new connection screen model.
