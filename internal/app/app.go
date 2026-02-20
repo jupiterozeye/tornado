@@ -1,34 +1,4 @@
 // Package app contains the root application model and screen navigation logic.
-//
-// This is the heart of your Tornado application. The App struct is the
-// top-level Model in the Elm Architecture. It manages:
-//   - Which screen is currently active (Connect, Browser, Query, Dashboard)
-//   - Global application state (current database connection, settings)
-//   - Navigation between screens
-//
-// The App acts as a "router" - it delegates Update and View calls to the
-// active screen, and handles screen transitions via messages.
-//
-// TODO: Implement the following:
-//   - [ ] Define Screen type for type-safe screen identifiers
-//   - [ ] Implement screen transition logic in Update
-//   - [ ] Create message types for screen changes
-//   - [ ] Handle window resize events globally
-//   - [ ] Manage global keybindings (quit, help, etc.)
-//
-// Key Learning - The Elm Architecture:
-//
-//	The pattern is: Model -> View -> User Action -> Update -> Model (repeat)
-//	- Model: Your application state (structs)
-//	- View: Renders the model to a string
-//	- Update: Takes a message and model, returns new model and commands
-//	- Cmd: Asynchronous operations (I/O, timers, etc.)
-//
-// Key Learning - Composition:
-//
-//	This app is composed of smaller models (screens). Each screen has its
-//	own Init/Update/View methods. The App delegates to the active screen.
-//
 // References:
 //   - https://github.com/charmbracelet/bubbletea#tutorial
 //   - https://guide.elm-lang.org/architecture/
@@ -36,17 +6,17 @@ package app
 
 import (
 	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jupiterozeye/tornado/internal/db"
-	"github.com/jupiterozeye/tornado/internal/models"
+	//"github.com/jupiterozeye/tornado/internal/models"
 	"github.com/jupiterozeye/tornado/internal/ui/screens"
 	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // Screen represents the different views/modes of the application.
-// TODO: Consider using an int or string type for screen identifiers.
-// Using a type alias makes the code more readable and type-safe.
 type Screen int
 
 const (
@@ -84,6 +54,7 @@ type App struct {
 	height        int
 	db            db.Database
 	styles        *styles.Styles
+	err           error
 
 	// Screen models - each is a separate Bubble Tea model
 	connectScreen   *screens.ConnectModel
@@ -143,6 +114,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentScreen = msg.Screen
 		return a, a.getActiveScreen().Init()
 
+	case ErrorMsg:
+		a.err = msg.Err
+		return a, nil
+
 	default:
 		// Pass all other messages to current screen
 		return a.delegateToActiveScreen(msg)
@@ -181,62 +156,74 @@ func (a *App) getActiveScreen() tea.Model {
 }
 
 func (a *App) delegateToActiveScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	var newModel tea.Model
+
+	switch a.currentScreen {
+	case ScreenConnect:
+		newModel, cmd = a.connectScreen.Update(msg)
+		a.connectScreen = newModel.(*screens.ConnectModel)
+	case ScreenBrowser:
+		newModel, cmd = a.browserScreen.Update(msg)
+		a.browserScreen = newModel.(*screens.BrowserModel)
+	case ScreenQuery:
+		newModel, cmd = a.queryScreen.Update(msg)
+		a.queryScreen = newModel.(*screens.QueryModel)
+	case ScreenDashboard:
+		newModel, cmd = a.dashboardScreen.Update(msg)
+		a.dashboardScreen = newModel.(*screens.DashboardModel)
+
+	}
+
+	return a, cmd
 
 }
 
 // View renders the current state of the application.
 // It delegates rendering to the active screen.
-//
-// Key Learning - View Functions:
-//   - View should be a pure function of the model
-//   - Don't do I/O or calculations in View
-//   - Use Lip Gloss for styling and layout
-//   - The returned string is printed to the terminal
-//
-// TODO: Implement View:
-//   - [ ] Call active screen's View()
-//   - [ ] Add status bar at the bottom
-//   - [ ] Handle error display overlay
-//   - [ ] Use lipgloss.JoinVertical to compose layout
 func (a *App) View() string {
-	// TODO: Implement view composition
-	//
-	// Example structure:
-	// 1. Get the active screen's view
-	// 2. Add a status bar at the bottom
-	// 3. Add an error overlay if there's an error
-	//
-	// return lipgloss.JoinVertical(
-	//     lipgloss.Left,
-	//     a.activeScreen().View(),
-	//     a.renderStatusBar(),
-	// )
+	// Get active screens content
+	content := a.getActiveScreen().View()
 
-	return "Tornado - Database TUI\n\nPress q to quit"
+	// Render status bar
+	statusBar := a.renderStatusBar()
+
+	if a.err != nil {
+		// Show error overlay
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			a.getActiveScreen().View(),
+			a.styles.Error.Render("Error: "+a.err.Error()),
+		)
+
+	}
+	// Join vertically
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		content,
+		statusBar,
+	)
 }
 
-// activeScreen returns the model for the currently displayed screen.
-// TODO: Implement this helper method
-func (a *App) activeScreen() tea.Model {
-	// TODO: Return the appropriate screen model based on a.currentScreen
-	return nil
+func (a *App) renderStatusBar() string {
+	// Show current screen and shortcuts
+	screenName := a.currentScreen.String()
+	return a.styles.StatusBar.Render(
+		fmt.Sprintf(" %s | Tab: Next | q: Quit", screenName),
+	)
 }
 
 // ScreenChangeMsg is a message for transitioning between screens.
-// TODO: Move this to a separate messages.go file if you have many message types.
 type ScreenChangeMsg struct {
 	Screen Screen
 }
 
 // ConnectSuccessMsg is sent when a database connection is established.
-// This triggers a transition from Connect screen to Browser screen.
-// TODO: Define this message and handle it in Update
 type ConnectSuccessMsg struct {
 	DB db.Database
 }
 
 // ErrorMsg represents a global error to display to the user.
-// TODO: Implement error display in View
 type ErrorMsg struct {
 	Err error
 }
