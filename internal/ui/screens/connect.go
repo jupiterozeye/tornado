@@ -14,12 +14,12 @@
 //	It demonstrates how to compose multiple components.
 //
 // TODO: Implement the connection form screen:
-//   - [ ] Define ConnectModel struct with form fields
-//   - [ ] Implement NewConnectModel constructor
-//   - [ ] Implement Init with focus on first field
-//   - [ ] Implement Update for form navigation and submission
-//   - [ ] Implement View to render the form
-//   - [ ] Add database type selector (SQLite vs PostgreSQL)
+//   - [x] Define ConnectModel struct with form fields
+//   - [x] Implement NewConnectModel constructor
+//   - [x] Implement Init with focus on first field
+//   - [x] Implement Update for form navigation and submission
+//   - [x] Implement View to render the form
+//   - [x] Add database type selector (SQLite vs PostgreSQL)
 //   - [ ] Add connection validation
 //   - [ ] Add "recent connections" list
 //
@@ -34,8 +34,13 @@
 package screens
 
 import (
+	"strconv"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"
 	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
@@ -55,7 +60,7 @@ type ConnectModel struct {
 	// UI state
 	focusIndex   int    // Which field is focused
 	isConnecting bool   // Currently attempting connection
-	error        string // Error message to display
+	errorMsg     string // Error message to display
 
 	// Dimensions
 	width  int
@@ -71,9 +76,11 @@ type ConnectModel struct {
 
 // NewConnectModel creates a new connection screen model.
 //
-// TODO: Initialize all form fields with appropriate defaults
+// Initializes all form fields with appropriate defaults
 // TODO: Load recent connections from history
-func NewConnectModel(s *styles.Styles) *ConnectModel {
+func NewConnectModel() *ConnectModel {
+	s := styles.Default()
+
 	// Initialize database type input
 	dbType := textinput.New()
 	dbType.Placeholder = "sqlite"
@@ -117,24 +124,21 @@ func NewConnectModel(s *styles.Styles) *ConnectModel {
 		databaseInput: database,
 		focusIndex:    0,
 		isConnecting:  false,
-		error:         "",
+		errorMsg:      "",
 		showRecent:    false,
 		styles:        s,
 	}
 }
 
 // Init returns the initial command for the connection screen.
-// Usually returns nil since we just want to show the form.
+// Returns textinput.Blink to make the cursor blink.
 //
 // TODO: Consider what should happen on init:
 //   - Focus first input field? (handled in constructor)
 //   - Load recent connections from file?
 //   - Check for default database file?
 func (m *ConnectModel) Init() tea.Cmd {
-	// TODO: Return initialization commands
-	// Example: Load recent connections
-	// return loadRecentConnections()
-	return nil
+	return textinput.Blink
 }
 
 // Update handles messages for the connection screen.
@@ -151,43 +155,45 @@ func (m *ConnectModel) Init() tea.Cmd {
 //   - tea.WindowSizeMsg: Terminal resize
 //   - ConnectSuccessMsg: Connection succeeded
 //   - ConnectErrorMsg: Connection failed
-//
-// TODO: Implement complete form handling
 func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// TODO: Implement message handling
-	//
-	// switch msg := msg.(type) {
-	// case tea.WindowSizeMsg:
-	//     m.width = msg.Width
-	//     m.height = msg.Height
-	//
-	// case tea.KeyMsg:
-	//     switch msg.String() {
-	//     case "tab":
-	//         m.nextField()
-	//     case "shift+tab":
-	//         m.prevField()
-	//     case "enter":
-	//         return m.handleEnter()
-	//     case "up":
-	//         m.prevField()
-	//     case "down":
-	//         m.nextField()
-	//     default:
-	//         // Pass to focused input
-	//         return m.updateFocusedInput(msg)
-	//     }
-	//
-	// case ConnectSuccessMsg:
-	//     // Transition to browser screen
-	//     return m, func() tea.Msg {
-	//         return ScreenChangeMsg{Screen: ScreenBrowser}
-	//     }
-	//
-	// case ConnectErrorMsg:
-	//     m.isConnecting = false
-	//     m.error = msg.Error()
-	// }
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
+	case tea.KeyMsg:
+		// First, update the focused input for cursor blinking and state
+		var cmd tea.Cmd
+
+		switch msg.String() {
+		case "tab":
+			m.nextField()
+		case "shift+tab":
+			m.prevField()
+		case "up":
+			m.prevField()
+		case "down":
+			m.nextField()
+		case "enter":
+			return m.handleEnter()
+		default:
+			// Pass character input to focused field
+			return m.updateFocusedInput(msg)
+		}
+
+		// For navigation keys, still update focused input for cursor blinking
+		_, cmd = m.updateFocusedInput(msg)
+		return m, cmd
+
+	case ConnectSuccessMsg:
+		// Return the success message - app.go will handle the transition
+		return m, nil
+
+	case ConnectErrorMsg:
+		m.isConnecting = false
+		m.errorMsg = msg.Error
+		return m, nil
+	}
 
 	return m, nil
 }
@@ -200,50 +206,211 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 //   - Form fields (different based on db type)
 //   - Error message (if any)
 //   - Help/keybindings
-//
-// TODO: Implement form rendering with Lip Gloss styling
 func (m *ConnectModel) View() string {
-	// TODO: Implement view composition
-	//
-	// Structure:
-	// 1. Title: "Tornado - Database Connection"
-	// 2. Database type toggle: [SQLite] [PostgreSQL]
-	// 3. Form fields based on type:
-	//    SQLite:    File Path: [________________]
-	//    PostgreSQL: Host: [________] Port: [____]
-	//               User: [________] Password: [________]
-	//               Database: [________]
-	// 4. Connect button: [Connect]
-	// 5. Error message in red if any
-	// 6. Help at bottom: Tab: switch field, Enter: connect, Ctrl+R: recent
-	//
-	// Use lipgloss.JoinVertical and lipgloss.JoinHorizontal for layout
+	// Title
+	title := m.styles.Title.Render("Tornado - Database Connection")
 
-	return "Connection Screen\n\nTODO: Implement connection form"
+	// Show connecting message if connecting
+	if m.isConnecting {
+		connectingMsg := m.styles.Muted.Render("Connecting...")
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			title,
+			"",
+			connectingMsg,
+		)
+	}
+
+	// Form section header
+	formHeader := m.styles.Subheader.Render("Connection Details")
+
+	// Database type field
+	dbTypeLabel := "Database Type (sqlite/postgres):"
+	dbTypeField := m.renderField(dbTypeLabel, m.dbTypeInput.View(), 0)
+
+	// SQLite section
+	sqliteHeader := m.styles.Header.Render("SQLite Settings")
+	pathLabel := "File Path:"
+	pathField := m.renderField(pathLabel, m.pathInput.View(), 1)
+
+	// PostgreSQL section
+	postgresHeader := m.styles.Header.Render("PostgreSQL Settings")
+	hostLabel := "Host:"
+	hostField := m.renderField(hostLabel, m.hostInput.View(), 2)
+	portLabel := "Port:"
+	portField := m.renderField(portLabel, m.portInput.View(), 3)
+	userLabel := "Username:"
+	userField := m.renderField(userLabel, m.userInput.View(), 4)
+	passwordLabel := "Password:"
+	passwordField := m.renderField(passwordLabel, m.passwordInput.View(), 5)
+	dbLabel := "Database Name:"
+	dbField := m.renderField(dbLabel, m.databaseInput.View(), 6)
+
+	// Error message
+	var errorSection string
+	if m.errorMsg != "" {
+		errorSection = m.styles.Error.Render("Error: " + m.errorMsg)
+	}
+
+	// Help text
+	help := m.styles.Muted.Render("Tab/Shift+Tab: Navigate | Up/Down: Move | Enter: Connect | Ctrl+C: Quit")
+
+	// Combine all sections
+	content := []string{
+		title,
+		"",
+		formHeader,
+		"",
+		dbTypeField,
+		"",
+		sqliteHeader,
+		pathField,
+		"",
+		postgresHeader,
+		hostField,
+		portField,
+		userField,
+		passwordField,
+		dbField,
+	}
+
+	if errorSection != "" {
+		content = append(content, "", errorSection)
+	}
+
+	content = append(content, "", help)
+
+	return lipgloss.JoinVertical(lipgloss.Left, content...)
 }
 
-// Focus handlers and form logic
-// TODO: Implement these helper methods
+// renderField renders a form field with label, applying focus styling if focused
+func (m *ConnectModel) renderField(label, value string, index int) string {
+	labelStyle := m.styles.Muted
+	if m.focusIndex == index {
+		labelStyle = m.styles.Bold
+		value = m.styles.InputFocus.Render(value)
+	} else {
+		value = m.styles.Input.Render(value)
+	}
 
+	return lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		labelStyle.Render(label+" "),
+		value,
+	)
+}
+
+// nextField moves focus to the next field
 func (m *ConnectModel) nextField() {
-	// TODO: Move focus to next field
+	m.blurCurrentField()
+	m.focusIndex++
+	if m.focusIndex > 6 {
+		m.focusIndex = 0
+	}
+	m.focusCurrentField()
 }
 
+// prevField moves focus to the previous field
 func (m *ConnectModel) prevField() {
-	// TODO: Move focus to previous field
+	m.blurCurrentField()
+	m.focusIndex--
+	if m.focusIndex < 0 {
+		m.focusIndex = 6
+	}
+	m.focusCurrentField()
 }
 
+// blurCurrentField removes focus from the current field
+func (m *ConnectModel) blurCurrentField() {
+	switch m.focusIndex {
+	case 0:
+		m.dbTypeInput.Blur()
+	case 1:
+		m.pathInput.Blur()
+	case 2:
+		m.hostInput.Blur()
+	case 3:
+		m.portInput.Blur()
+	case 4:
+		m.userInput.Blur()
+	case 5:
+		m.passwordInput.Blur()
+	case 6:
+		m.databaseInput.Blur()
+	}
+}
+
+// focusCurrentField sets focus on the current field
+func (m *ConnectModel) focusCurrentField() {
+	switch m.focusIndex {
+	case 0:
+		m.dbTypeInput.Focus()
+	case 1:
+		m.pathInput.Focus()
+	case 2:
+		m.hostInput.Focus()
+	case 3:
+		m.portInput.Focus()
+	case 4:
+		m.userInput.Focus()
+	case 5:
+		m.passwordInput.Focus()
+	case 6:
+		m.databaseInput.Focus()
+	}
+}
+
+// handleEnter handles the enter key press
 func (m *ConnectModel) handleEnter() (tea.Model, tea.Cmd) {
-	// TODO: If on connect button, start connection
+	// If on last field, start connection
+	if m.focusIndex == 6 {
+		return m, m.startConnection()
+	}
 	// Otherwise, move to next field
+	m.nextField()
 	return m, nil
 }
 
+// updateFocusedInput passes keyboard input to the focused input field
+func (m *ConnectModel) updateFocusedInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch m.focusIndex {
+	case 0:
+		m.dbTypeInput, cmd = m.dbTypeInput.Update(msg)
+	case 1:
+		m.pathInput, cmd = m.pathInput.Update(msg)
+	case 2:
+		m.hostInput, cmd = m.hostInput.Update(msg)
+	case 3:
+		m.portInput, cmd = m.portInput.Update(msg)
+	case 4:
+		m.userInput, cmd = m.userInput.Update(msg)
+	case 5:
+		m.passwordInput, cmd = m.passwordInput.Update(msg)
+	case 6:
+		m.databaseInput, cmd = m.databaseInput.Update(msg)
+	}
+
+	return m, cmd
+}
+
 // getConfig returns the connection config from form inputs.
-//
-// TODO: Implement config extraction
 func (m *ConnectModel) getConfig() models.ConnectionConfig {
-	return models.ConnectionConfig{}
+	port, _ := strconv.Atoi(m.portInput.Value())
+	if port == 0 {
+		port = 5432
+	}
+
+	return models.ConnectionConfig{
+		Type:     m.dbTypeInput.Value(),
+		Path:     m.pathInput.Value(),
+		Host:     m.hostInput.Value(),
+		Port:     port,
+		User:     m.userInput.Value(),
+		Password: m.passwordInput.Value(),
+		Database: m.databaseInput.Value(),
+	}
 }
 
 // startConnection initiates a database connection.
@@ -253,14 +420,19 @@ func (m *ConnectModel) getConfig() models.ConnectionConfig {
 //   - Return a tea.Cmd that performs the operation
 //   - The Cmd runs in a goroutine
 //   - When done, it returns a message with the result
-//
-// TODO: Implement async connection
 func (m *ConnectModel) startConnection() tea.Cmd {
-	// TODO: Return a command that:
-	// 1. Creates the appropriate Database implementation
-	// 2. Calls Connect with the form config
-	// 3. Returns ConnectSuccessMsg or ConnectErrorMsg
-	return nil
+	m.isConnecting = true
+	m.errorMsg = ""
+
+	config := m.getConfig()
+
+	return func() tea.Msg {
+		database, err := db.Open(config)
+		if err != nil {
+			return ConnectErrorMsg{Error: err.Error()}
+		}
+		return ConnectSuccessMsg{DB: database}
+	}
 }
 
 // ConnectAttemptMsg signals that a connection attempt is starting.
@@ -268,7 +440,7 @@ type ConnectAttemptMsg struct{}
 
 // ConnectSuccessMsg signals successful database connection.
 type ConnectSuccessMsg struct {
-	Config models.ConnectionConfig
+	DB db.Database
 }
 
 // ConnectErrorMsg signals a failed connection attempt.

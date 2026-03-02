@@ -87,11 +87,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "ctrl+c":
 			return a, tea.Quit
 		case "tab":
 			a.switchToNextScreen()
 			return a, nil
+		default:
+			// Pass all other keys to the active screen
+			return a.delegateToActiveScreen(msg)
 		}
 	case tea.WindowSizeMsg:
 		// Store dimensions for responsive lasyout
@@ -100,7 +103,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Propagate to active screen
 		return a.delegateToActiveScreen(msg)
 
-	case ConnectSuccessMsg:
+	case screens.ConnectSuccessMsg:
 		// Initialize other screens now that we have DB
 		a.db = msg.DB
 		a.browserScreen = screens.NewBrowserModel(a.db)
