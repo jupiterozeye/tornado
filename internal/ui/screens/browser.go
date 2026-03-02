@@ -39,10 +39,14 @@
 package screens
 
 import (
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"
+	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 // BrowserModel is the model for the database browser screen.
@@ -53,35 +57,29 @@ import (
 //   - Main content state (table viewer)
 //   - Current selection
 type BrowserModel struct {
-	// TODO: Add these fields
-	//
-	// ===== Database =====
-	// db            db.Database
-	//
-	// ===== UI State =====
-	// width         int
-	// height        int
-	// focus         browserFocus  // sidebar or content
-	//
-	// ===== Sidebar =====
-	// sidebarWidth  int
-	// tableList     list.Model    // bubbles/list for tables
-	// schemas       []string
-	// currentSchema string
-	//
-	// ===== Content =====
-	// tableViewer   table.Model   // bubbles/table for data
-	// currentTable  string
-	// tableSchema   *models.TableSchema
-	//
-	// ===== Pagination =====
-	// currentPage   int
-	// totalPages    int
-	// pageSize      int
-	// totalRows     int64
-	//
-	// ===== Styling =====
-	// styles        *styles.Styles
+	// Database
+	db db.Database
+	// UI State
+	width  int
+	height int
+	focus  browserFocus // sidebar or content
+	// Sidebar
+	sidebarWidth  int
+	tableList     list.Model // bubbles/list for tables
+	schemas       []string
+	currentSchema string
+	// Content
+	tableViewer  table.Model // bubbles/table for data
+	currentTable string
+	tableSchema  *models.TableSchema
+	// Pagination
+	currentPage int
+	totalPages  int
+	pageSize    int
+	totalRows   int64
+
+	// Styling
+	styles *styles.Styles
 }
 
 // browserFocus represents which panel has focus.
@@ -93,25 +91,52 @@ const (
 )
 
 // NewBrowserModel creates a new browser screen model.
-//
-// TODO: Initialize with database connection
 func NewBrowserModel(database db.Database) *BrowserModel {
+	s := styles.Default()
+
+	// initialize table list(sidebar)
+	// list.New() takes : items, delegate, width, height
+	tableList := list.New(
+		[]list.Item{},
+		list.NewDefaultDelegate(),
+		30,
+		20,
+	)
+	tableList.Title = "Tables"
+	tableList.SetShowStatusBar(false)
+	tableList.SetFilteringEnabled(true)
+	tableList.Styles.Title = s.Header
+
+	// initialize table viewer (main content)
+	tableViewer := table.New(
+		table.WithColumns([]table.Column{}),
+		table.WithRows([]table.Row{}),
+		table.WithFocused(true),
+		table.WithHeight(20),
+	)
+
+	// table styling
+	tableViewer.SetStyles(table.Styles{
+		Header:   s.Header,
+		Cell:     lipgloss.NewStyle().Padding(0, 1),
+		Selected: lipgloss.NewStyle().Foreground(styles.Primary).Bold(true),
+	})
 	return &BrowserModel{
-		// TODO: Initialize fields
-		// db: database,
-		// focus: focusSidebar,
-		// pageSize: 50,
+		db:            database,
+		focus:         focusSidebar,
+		sidebarWidth:  30,
+		pageSize:      50,
+		currentPage:   1,
+		tableList:     tableList,
+		tableViewer:   tableViewer,
+		styles:        s,
+		currentSchema: "main", //default for sqlite
 	}
 }
 
 // Init returns the initial command for the browser screen.
-// Should load the table list from the database.
-//
-// TODO: Return command to load tables
 func (m *BrowserModel) Init() tea.Cmd {
-	// TODO: Return command to load table list
-	// return m.loadTables()
-	return nil
+	return m.loadTables()
 }
 
 // Update handles messages for the browser screen.
@@ -183,6 +208,13 @@ func (m *BrowserModel) toggleFocus() {
 }
 
 func (m *BrowserModel) loadTables() tea.Cmd {
+	return func() tea.Msg {
+		tables, err := m.db.ListTables()
+		return TablesLoadedMsg{
+			Tables: tables,
+			Err:    err,
+		}
+	}
 	// TODO: Return async command to fetch table list
 	return nil
 }
