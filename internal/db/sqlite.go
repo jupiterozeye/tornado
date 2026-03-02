@@ -30,7 +30,7 @@ func NewSQLiteDB() *SQLiteDB {
 
 // Connect opens the SQLite database file.
 func (s *SQLiteDB) Connect(config models.ConnectionConfig) error {
-	db, err := sql.Open("sqlite3", config.Path)
+	db, err := sql.Open("sqlite", config.Path)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
