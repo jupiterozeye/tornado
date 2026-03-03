@@ -48,6 +48,13 @@ const (
 	PaneResults
 )
 
+type QueryMode int
+
+const (
+	QueryModeNormal QueryMode = iota
+	QueryModeInsert
+)
+
 // BrowserModel is the model for the database browser screen.
 type BrowserModel struct {
 	// Database connection
@@ -65,6 +72,7 @@ type BrowserModel struct {
 	width       int
 	height      int
 	focusedPane Pane
+	queryMode   QueryMode
 	styles      *styles.Styles
 
 	// Query results
@@ -103,6 +111,7 @@ func NewBrowserModel(database db.Database) *BrowserModel {
 		query:         query,
 		results:       results,
 		focusedPane:   PaneExplorer,
+		queryMode:     QueryModeNormal,
 		styles:        s,
 	}
 }
@@ -181,11 +190,6 @@ func (m *BrowserModel) View() string {
 		return "Loading..."
 	}
 
-	// Get pane styles
-	explorerStyle := m.layoutManager.GetExplorerStyle(m.focusedPane == PaneExplorer)
-	queryStyle := m.layoutManager.GetQueryStyle(m.focusedPane == PaneQuery)
-	resultsStyle := m.layoutManager.GetResultsStyle(m.focusedPane == PaneResults)
-
 	_, _, ew, eh := m.layoutManager.GetExplorerBounds()
 	_, _, qw, qh := m.layoutManager.GetQueryBounds()
 	_, _, rw, rh := m.layoutManager.GetResultsBounds()
@@ -197,14 +201,18 @@ func (m *BrowserModel) View() string {
 	} else {
 		explorerContent = "Loading..."
 	}
-	explorerPane := explorerStyle.Render(m.decoratePane("Explorer", "e", explorerContent, ew, eh))
+	explorerPane := m.renderPane("Explorer", "e", explorerContent, ew, eh, m.focusedPane == PaneExplorer)
 
 	// Render query editor
-	queryPane := queryStyle.Render(m.decoratePane("Query", "q", m.query.View(), qw, qh))
+	queryTitle := "Query [NORMAL]"
+	if m.queryMode == QueryModeInsert {
+		queryTitle = "Query [INSERT]"
+	}
+	queryPane := m.renderPane(queryTitle, "q", m.query.View(), qw, qh, m.focusedPane == PaneQuery)
 
 	// Render results
 	resultsContent := m.renderResults()
-	resultsPane := resultsStyle.Render(m.decoratePane("Results", "r", resultsContent, rw, rh))
+	resultsPane := m.renderPane("Results", "r", resultsContent, rw, rh, m.focusedPane == PaneResults)
 
 	// Combine right side panes vertically
 	rightSide := lipgloss.JoinVertical(
@@ -213,12 +221,13 @@ func (m *BrowserModel) View() string {
 		resultsPane,
 	)
 
-	// Join explorer with right side horizontally
-	return lipgloss.JoinHorizontal(
+	main := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		explorerPane,
 		rightSide,
 	)
+
+	return lipgloss.JoinVertical(lipgloss.Left, main, m.renderContextFooter())
 }
 
 func (m *BrowserModel) decoratePane(title, key, content string, paneWidth, paneHeight int) string {
@@ -234,6 +243,88 @@ func (m *BrowserModel) decoratePane(title, key, content string, paneWidth, paneH
 	header := m.styles.Muted.Render(fmt.Sprintf("(%s) %s", key, title))
 	body := clipText(content, innerWidth, innerHeight)
 	return lipgloss.JoinVertical(lipgloss.Left, header, body)
+}
+
+func (m *BrowserModel) renderPane(title, key, content string, paneWidth, paneHeight int, focused bool) string {
+	if paneWidth < 4 {
+		paneWidth = 4
+	}
+	if paneHeight < 3 {
+		paneHeight = 3
+	}
+
+	innerWidth := paneWidth - 2
+	bodyHeight := paneHeight - 2
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	if bodyHeight < 1 {
+		bodyHeight = 1
+	}
+
+	label := fmt.Sprintf("(%s) %s", key, title)
+	top := makeTopBorder(label, innerWidth)
+	body := clipText(content, innerWidth, bodyHeight)
+	bodyLines := strings.Split(body, "\n")
+	for len(bodyLines) < bodyHeight {
+		bodyLines = append(bodyLines, "")
+	}
+
+	borderColor := styles.Border
+	if focused {
+		borderColor = styles.BorderFocus
+	}
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+
+	var out []string
+	out = append(out, borderStyle.Render("╭"+top+"╮"))
+	for i := 0; i < bodyHeight; i++ {
+		line := padToWidth(truncateToWidth(bodyLines[i], innerWidth), innerWidth)
+		out = append(out, borderStyle.Render("│")+line+borderStyle.Render("│"))
+	}
+	out = append(out, borderStyle.Render("╰"+strings.Repeat("─", innerWidth)+"╯"))
+
+	return strings.Join(out, "\n")
+}
+
+func makeTopBorder(label string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	segment := "─ " + label + " "
+	segment = truncateToWidth(segment, width)
+	if lipgloss.Width(segment) < width {
+		segment += strings.Repeat("─", width-lipgloss.Width(segment))
+	}
+	return segment
+}
+
+func padToWidth(s string, width int) string {
+	w := lipgloss.Width(s)
+	if w >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-w)
+}
+
+func (m *BrowserModel) renderContextFooter() string {
+	var text string
+	switch m.focusedPane {
+	case PaneExplorer:
+		text = "Explorer: j/k Move  Enter Expand/Collapse  s Select TOP 100  r Refresh"
+	case PaneQuery:
+		if m.queryMode == QueryModeInsert {
+			text = "Query INSERT: Esc Normal  Enter Newline"
+		} else {
+			text = "Query NORMAL: i Insert  Enter Execute  e Explorer  r Results"
+		}
+	case PaneResults:
+		text = "Results: j/k Move  q Query  e Explorer"
+	}
+
+	line := truncateToWidth(text, m.width)
+	line = padToWidth(line, m.width)
+	return m.styles.StatusBar.Render(line)
 }
 
 func clipText(content string, width, height int) string {
@@ -293,13 +384,13 @@ func (m *BrowserModel) updateComponentSizes() {
 
 	// Update query editor size
 	_, _, qw, qh := m.layoutManager.GetQueryBounds()
-	m.query.SetWidth(qw - 4) // Account for borders/padding
-	m.query.SetHeight(qh - 4)
+	m.query.SetWidth(qw - 6)
+	m.query.SetHeight(qh - 6)
 
 	// Update results table size
 	_, _, rw, rh := m.layoutManager.GetResultsBounds()
-	m.results.SetWidth(rw - 4)
-	m.results.SetHeight(rh - 4)
+	m.results.SetWidth(rw - 6)
+	m.results.SetHeight(rh - 6)
 }
 
 func (m *BrowserModel) updateFocus() {
@@ -310,7 +401,11 @@ func (m *BrowserModel) updateFocus() {
 
 	// Update query focus
 	if m.focusedPane == PaneQuery {
-		m.query.Focus()
+		if m.queryMode == QueryModeInsert {
+			m.query.Focus()
+		} else {
+			m.query.Blur()
+		}
 	} else {
 		m.query.Blur()
 	}
@@ -331,9 +426,28 @@ func (m *BrowserModel) routeKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case PaneQuery:
-		var cmd tea.Cmd
-		m.query, cmd = m.query.Update(msg)
-		return m, cmd
+		switch m.queryMode {
+		case QueryModeNormal:
+			switch msg.String() {
+			case "i", "a":
+				m.queryMode = QueryModeInsert
+				m.query.Focus()
+				return m, nil
+			case "enter":
+				return m, m.executeQuery()
+			default:
+				return m, nil
+			}
+		case QueryModeInsert:
+			if msg.String() == "esc" {
+				m.queryMode = QueryModeNormal
+				m.query.Blur()
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.query, cmd = m.query.Update(msg)
+			return m, cmd
+		}
 	case PaneResults:
 		var cmd tea.Cmd
 		m.results, cmd = m.results.Update(msg)

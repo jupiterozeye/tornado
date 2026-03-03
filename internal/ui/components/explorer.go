@@ -337,28 +337,33 @@ func (m *ExplorerModel) expandOrLoad() tea.Cmd {
 
 	node := m.flatList[m.cursor]
 
-	if !node.Expanded {
-		node.Expanded = true
-
-		// Load children if needed
-		switch node.Type {
-		case NodeCategory:
-			switch node.Name {
-			case "Tables":
-				return m.loadTables()
-			case "Views":
-				return m.loadViews()
-			case "Triggers":
-				return m.loadTriggers()
-			case "Sequences":
-				return m.loadSequences()
-			}
-		case NodeTable:
-			return m.loadColumns(node.Name)
-		}
-
+	// Toggle collapse if already expanded.
+	if node.Expanded {
+		node.Expanded = false
 		m.flattenTree()
+		return nil
 	}
+
+	node.Expanded = true
+
+	// Load children if needed
+	switch node.Type {
+	case NodeCategory:
+		switch node.Name {
+		case "Tables":
+			return m.loadTables()
+		case "Views":
+			return m.loadViews()
+		case "Triggers":
+			return m.loadTriggers()
+		case "Sequences":
+			return m.loadSequences()
+		}
+	case NodeTable:
+		return m.loadColumns(node.Name)
+	}
+
+	m.flattenTree()
 
 	return nil
 }
@@ -385,6 +390,14 @@ func (m *ExplorerModel) SetFocused(focused bool) {
 func (m *ExplorerModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
+}
+
+// CurrentNode returns the currently highlighted node.
+func (m *ExplorerModel) CurrentNode() *TreeNode {
+	if m.cursor < 0 || m.cursor >= len(m.flatList) {
+		return nil
+	}
+	return m.flatList[m.cursor]
 }
 
 // Async loading commands
