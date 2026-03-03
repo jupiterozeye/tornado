@@ -227,21 +227,53 @@ func (m *ExplorerModel) renderNode(node *TreeNode, selected bool) string {
 	}
 
 	line := indent + prefix + name
+	maxWidth := m.width - 4
+	if maxWidth < 1 {
+		maxWidth = 1
+	}
+	line = truncateLine(line, maxWidth)
 
 	// Apply selection styling
 	if selected {
-		return m.styles.Bold.Render(line)
+		return lipgloss.NewStyle().Bold(true).Foreground(styles.TextBold).Render(line)
 	}
 
 	// Apply type-specific styling
 	switch node.Type {
 	case NodeCategory:
-		return m.styles.Header.Render(line)
+		return lipgloss.NewStyle().Bold(true).Foreground(styles.Secondary).Render(line)
 	case NodeTable:
 		return lipgloss.NewStyle().Foreground(styles.Primary).Render(line)
 	default:
-		return m.styles.Body.Render(line)
+		return lipgloss.NewStyle().Foreground(styles.Text).Render(line)
 	}
+}
+
+func truncateLine(s string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+
+	max := width
+	if width > 1 {
+		max = width - 1
+	}
+
+	var b strings.Builder
+	for _, r := range s {
+		next := b.String() + string(r)
+		if lipgloss.Width(next) > max {
+			break
+		}
+		b.WriteRune(r)
+	}
+	if width > 1 {
+		return b.String() + "…"
+	}
+	return b.String()
 }
 
 func (m *ExplorerModel) getIndent(node *TreeNode) string {
@@ -504,12 +536,13 @@ func (m *ExplorerModel) updateColumns(tableName string, columns []models.Column)
 				if table.Name == tableName {
 					table.Children = nil
 					for _, col := range columns {
+						c := col
 						table.Children = append(table.Children, &TreeNode{
-							Name:       col.Name,
+							Name:       c.Name,
 							Type:       NodeColumn,
 							Parent:     table,
 							TableName:  tableName,
-							ColumnInfo: &col,
+							ColumnInfo: &c,
 						})
 					}
 					table.Expanded = true

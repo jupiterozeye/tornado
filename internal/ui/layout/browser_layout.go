@@ -15,9 +15,9 @@ const (
 )
 
 // Layout manages the 3-pane layout calculations
-// - Explorer: 15% width, 100% height (left side)
-// - Query: 85% width, 50% height (top-right)
-// - Results: 85% width, 50% height (bottom-right)
+// - Explorer: 22% width, 100% height (left side)
+// - Query: 78% width, 50% height (top-right)
+// - Results: 78% width, 50% height (bottom-right)
 type Layout struct {
 	width  int
 	height int
@@ -36,16 +36,22 @@ func (l *Layout) Update(width, height int) {
 
 // GetExplorerBounds returns the bounds for the Explorer pane
 func (l *Layout) GetExplorerBounds() (x, y, width, height int) {
-	width = int(float64(l.width) * 0.15)
-	if width < 20 {
-		width = 20 // Minimum width
+	width = int(float64(l.width) * 0.22)
+	if width < 24 {
+		width = 24 // Minimum width
+	}
+	if l.width > 0 && width > l.width-40 {
+		width = l.width - 40 // Keep enough room for query/results panes
+		if width < 16 {
+			width = 16
+		}
 	}
 	return 0, 0, width, l.height
 }
 
 // GetQueryBounds returns the bounds for the Query pane
 func (l *Layout) GetQueryBounds() (x, y, width, height int) {
-	explorerWidth, _, _, _ := l.GetExplorerBounds()
+	_, _, explorerWidth, _ := l.GetExplorerBounds()
 	x = explorerWidth
 	y = 0
 	width = l.width - explorerWidth
@@ -55,7 +61,7 @@ func (l *Layout) GetQueryBounds() (x, y, width, height int) {
 
 // GetResultsBounds returns the bounds for the Results pane
 func (l *Layout) GetResultsBounds() (x, y, width, height int) {
-	explorerWidth, _, _, _ := l.GetExplorerBounds()
+	_, _, explorerWidth, _ := l.GetExplorerBounds()
 	_, _, _, queryHeight := l.GetQueryBounds()
 	x = explorerWidth
 	y = queryHeight
@@ -74,8 +80,10 @@ func (l *Layout) GetExplorerStyle(focused bool) lipgloss.Style {
 	}
 
 	return lipgloss.NewStyle().
-		Width(w-2). // Account for borders
-		Height(h-2).
+		Width(w).
+		Height(h).
+		MaxWidth(w).
+		MaxHeight(h).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1)
@@ -91,8 +99,10 @@ func (l *Layout) GetQueryStyle(focused bool) lipgloss.Style {
 	}
 
 	return lipgloss.NewStyle().
-		Width(w-2).
-		Height(h-2).
+		Width(w).
+		Height(h).
+		MaxWidth(w).
+		MaxHeight(h).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1)
@@ -108,8 +118,10 @@ func (l *Layout) GetResultsStyle(focused bool) lipgloss.Style {
 	}
 
 	return lipgloss.NewStyle().
-		Width(w-2).
-		Height(h-2).
+		Width(w).
+		Height(h).
+		MaxWidth(w).
+		MaxHeight(h).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1)

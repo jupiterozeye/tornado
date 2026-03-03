@@ -6,7 +6,10 @@ package screens
 
 import (
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,13 +30,23 @@ const (
 	StateConnecting
 )
 
+// DBTypeItem represents a database type option for the list
+type DBTypeItem struct {
+	name        string
+	description string
+}
+
+func (i DBTypeItem) FilterValue() string { return i.name }
+func (i DBTypeItem) Title() string       { return i.name }
+func (i DBTypeItem) Description() string { return i.description }
+
 // ConnectModel is the model for the connection screen.
 type ConnectModel struct {
 	// State
 	state ConnectionState
 
 	// Form fields
-	dbTypeInput   textinput.Model
+	dbTypeList    list.Model
 	pathInput     textinput.Model
 	hostInput     textinput.Model
 	portInput     textinput.Model
@@ -42,8 +55,10 @@ type ConnectModel struct {
 	databaseInput textinput.Model
 
 	// UI state
-	focusIndex int
+	focusIndex int // 0=dbType, 1=path, 2=host, 3=port, 4=user, 5=password, 6=database
+	showDbList bool
 	errorMsg   string
+	selectedDb string
 
 	// Dimensions
 	width  int
@@ -53,23 +68,35 @@ type ConnectModel struct {
 	styles *styles.Styles
 
 	// Loading spinner
-	spinner spinner.Model
+	spinner      spinner.Model
+	spinnerFrame int
 }
 
 // NewConnectModel creates a new connection screen model.
 func NewConnectModel() *ConnectModel {
 	s := styles.Default()
 
-	// Initialize spinner
+	// Initialize spinner with custom parenthsis spinner
 	sp := spinner.New()
-	sp.Spinner = spinner.Dot
+	sp.Spinner = spinner.Spinner{
+		Frames: []string{"⎛", "⎜", "⎝", "⎞", "⎟", "⎠"},
+		FPS:    time.Second / 8,
+	}
 	sp.Style = lipgloss.NewStyle().Foreground(styles.Primary)
 
-	// Initialize form fields
-	dbType := textinput.New()
-	dbType.Placeholder = "sqlite"
-	dbType.CharLimit = 20
+	// Initialize DB type list
+	dbItems := []list.Item{
+		DBTypeItem{name: "SQLite", description: "Local file-based database"},
+		DBTypeItem{name: "PostgreSQL", description: "Network database server"},
+	}
 
+	dbList := list.New(dbItems, list.NewDefaultDelegate(), 40, 6)
+	dbList.Title = "Select Database Type"
+	dbList.SetShowStatusBar(false)
+	dbList.SetFilteringEnabled(false)
+	dbList.Styles.Title = s.Header
+
+	// Initialize form fields
 	path := textinput.New()
 	path.Placeholder = "/path/to/database.db"
 	path.CharLimit = 256
@@ -99,7 +126,7 @@ func NewConnectModel() *ConnectModel {
 		state:         StateWelcome,
 		styles:        s,
 		spinner:       sp,
-		dbTypeInput:   dbType,
+		dbTypeList:    dbList,
 		pathInput:     path,
 		hostInput:     host,
 		portInput:     port,
@@ -107,6 +134,8 @@ func NewConnectModel() *ConnectModel {
 		passwordInput: password,
 		databaseInput: database,
 		focusIndex:    0,
+		showDbList:    true,
+		selectedDb:    "SQLite",
 	}
 }
 
@@ -129,7 +158,7 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case " ":
 				m.state = StateForm
 				m.focusIndex = 0
-				m.dbTypeInput.Focus()
+				m.showDbList = true
 				return m, nil
 			case "ctrl+c":
 				return m, tea.Quit
@@ -139,27 +168,70 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleFormKeys(msg)
 
 		case StateConnecting:
-			// Only allow quit during connection
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
+			}
+			// If there's an error showing, any key returns to form
+			if m.errorMsg != "" {
+				m.state = StateForm
+				m.errorMsg = ""
+				return m, nil
 			}
 		}
 
 	case spinner.TickMsg:
 		if m.state == StateConnecting {
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			return m, cmd
+			m.spinnerFrame++
+			return m, nil
 		}
 
+	// Pass through connection messages so they bubble up to App
 	case ConnectSuccessMsg:
-		// Connection succeeded - app.go will handle transition
-		return m, nil
+		return m, func() tea.Msg { return msg }
 
 	case ConnectErrorMsg:
-		m.state = StateForm
 		m.errorMsg = msg.Err
-		return m, nil
+		return m, func() tea.Msg { return msg }
+	}
+
+	// Pass messages to DB list if showing
+	if m.state == StateForm && m.showDbList && m.focusIndex == 0 {
+		var cmd tea.Cmd
+		newListModel, cmd := m.dbTypeList.Update(msg)
+		m.dbTypeList = newListModel
+
+		// Check if an item was selected
+		if item, ok := m.dbTypeList.SelectedItem().(DBTypeItem); ok {
+			if item.name != m.selectedDb {
+				m.selectedDb = item.name
+				// Reset other fields when switching DB types
+				if m.selectedDb == "SQLite" {
+					m.focusIndex = 0
+				}
+			}
+		}
+
+		return m, cmd
+	}
+
+	// Pass messages to DB list if showing
+	if m.state == StateForm && m.showDbList && m.focusIndex == 0 {
+		var cmd tea.Cmd
+		newListModel, cmd := m.dbTypeList.Update(msg)
+		m.dbTypeList = newListModel
+
+		// Check if an item was selected
+		if item, ok := m.dbTypeList.SelectedItem().(DBTypeItem); ok {
+			if item.name != m.selectedDb {
+				m.selectedDb = item.name
+				// Reset other fields when switching DB types
+				if m.selectedDb == "SQLite" {
+					m.focusIndex = 0
+				}
+			}
+		}
+
+		return m, cmd
 	}
 
 	return m, nil
@@ -182,14 +254,28 @@ func (m *ConnectModel) handleFormKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "up":
+		if m.focusIndex == 0 && m.showDbList {
+			// Let the list handle it
+			return m, nil
+		}
 		m.prevField()
 		return m, nil
 
 	case "down":
+		if m.focusIndex == 0 && m.showDbList {
+			// Let the list handle it
+			return m, nil
+		}
 		m.nextField()
 		return m, nil
 
 	case "enter":
+		if m.focusIndex == 0 && m.showDbList {
+			// Select DB type and move to next field
+			m.showDbList = false
+			m.nextField()
+			return m, nil
+		}
 		if m.focusIndex == m.getMaxFieldIndex() {
 			return m, m.startConnection()
 		}
@@ -197,31 +283,28 @@ func (m *ConnectModel) handleFormKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	default:
-		// Update the focused input
-		var cmd tea.Cmd
-		switch m.focusIndex {
-		case 0:
-			oldType := m.dbTypeInput.Value()
-			m.dbTypeInput, cmd = m.dbTypeInput.Update(msg)
-			// Adjust focus if db type changed
-			if oldType != m.dbTypeInput.Value() {
-				m.adjustFocusForDbType()
-			}
-		case 1:
-			m.pathInput, cmd = m.pathInput.Update(msg)
-		case 2:
-			m.hostInput, cmd = m.hostInput.Update(msg)
-		case 3:
-			m.portInput, cmd = m.portInput.Update(msg)
-		case 4:
-			m.userInput, cmd = m.userInput.Update(msg)
-		case 5:
-			m.passwordInput, cmd = m.passwordInput.Update(msg)
-		case 6:
-			m.databaseInput, cmd = m.databaseInput.Update(msg)
-		}
-		return m, cmd
+		// Update the focused text input
+		return m.updateFocusedInput(msg)
 	}
+}
+
+func (m *ConnectModel) updateFocusedInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch m.focusIndex {
+	case 1:
+		m.pathInput, cmd = m.pathInput.Update(msg)
+	case 2:
+		m.hostInput, cmd = m.hostInput.Update(msg)
+	case 3:
+		m.portInput, cmd = m.portInput.Update(msg)
+	case 4:
+		m.userInput, cmd = m.userInput.Update(msg)
+	case 5:
+		m.passwordInput, cmd = m.passwordInput.Update(msg)
+	case 6:
+		m.databaseInput, cmd = m.databaseInput.Update(msg)
+	}
+	return m, cmd
 }
 
 // View renders the connection screen.
@@ -239,18 +322,14 @@ func (m *ConnectModel) View() string {
 }
 
 func (m *ConnectModel) viewWelcome() string {
-	// Center everything vertically and horizontally
 	centerStyle := lipgloss.NewStyle().
 		Width(m.width).
 		Height(m.height).
 		Align(lipgloss.Center, lipgloss.Center)
 
-	// Logo with primary color
-	logoStyle := lipgloss.NewStyle().
-		Foreground(styles.Primary)
+	logoStyle := lipgloss.NewStyle().Foreground(styles.Primary)
 	logo := logoStyle.Render(assets.Logo)
 
-	// Help text
 	helpStyle := lipgloss.NewStyle().
 		Foreground(styles.TextMuted).
 		MarginTop(2)
@@ -266,72 +345,95 @@ func (m *ConnectModel) viewWelcome() string {
 }
 
 func (m *ConnectModel) viewForm() string {
-	// Center the modal
 	centerStyle := lipgloss.NewStyle().
 		Width(m.width).
 		Height(m.height).
 		Align(lipgloss.Center, lipgloss.Center)
 
-	// Modal box style (matching explorer/query/results boxes)
 	isSQLite := m.isSQLite()
-	height := 12
+	height := 14
 	if !isSQLite {
-		height = 20
+		height = 22
 	}
 
 	modalStyle := lipgloss.NewStyle().
-		Width(60).
+		Width(50).
 		Height(height).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.BorderFocus).
 		Padding(1, 2)
 
-	// Title
-	title := m.styles.Subheader.Render("Database Connection")
+	title := m.styles.Subheader.Render("Connect to Database")
 
-	// Build form content
 	var fields []string
 
-	// DB Type selector
-	dbTypeLabel := m.styles.Muted.Render("Database Type:")
-	dbTypeField := m.renderField(0)
-	fields = append(fields, dbTypeLabel, dbTypeField, "")
+	// DB Type dropdown
+	if m.showDbList && m.focusIndex == 0 {
+		// Show full list
+		fields = append(fields, m.dbTypeList.View())
+	} else {
+		// Show selected value
+		dbLabel := m.styles.Muted.Render("Database Type:")
+		var dbValue string
+		if m.focusIndex == 0 {
+			dbValue = m.styles.InputFocus.Render("▸ " + m.selectedDb)
+		} else {
+			dbValue = m.styles.Input.Render("  " + m.selectedDb)
+		}
+		fields = append(fields, dbLabel, dbValue)
+	}
+
+	fields = append(fields, "")
 
 	if isSQLite {
-		// SQLite fields only
-		pathLabel := m.styles.Muted.Render("File Path:")
-		pathField := m.renderField(1)
+		// SQLite: File Path
+		pathLabel := m.styles.Muted.Render("Database File:")
+		pathValue := m.pathInput.Value()
+		if pathValue == "" {
+			pathValue = m.pathInput.View() // Show placeholder
+		}
+		pathField := m.renderTextField(1, pathValue)
 		fields = append(fields, pathLabel, pathField)
+
+		// Show current path for debugging
+		if pathValue != "" && pathValue != m.pathInput.Placeholder {
+			fields = append(fields, "", m.styles.Muted.Render("Path: "+pathValue))
+		}
 	} else {
 		// PostgreSQL fields
 		hostLabel := m.styles.Muted.Render("Host:")
-		hostField := m.renderField(2)
+		hostField := m.renderTextField(2, m.hostInput.View())
 		fields = append(fields, hostLabel, hostField)
 
 		portLabel := m.styles.Muted.Render("Port:")
-		portField := m.renderField(3)
+		portField := m.renderTextField(3, m.portInput.View())
 		fields = append(fields, "", portLabel, portField)
 
 		userLabel := m.styles.Muted.Render("Username:")
-		userField := m.renderField(4)
+		userField := m.renderTextField(4, m.userInput.View())
 		fields = append(fields, "", userLabel, userField)
 
 		passLabel := m.styles.Muted.Render("Password:")
-		passField := m.renderField(5)
+		passField := m.renderTextField(5, m.passwordInput.View())
 		fields = append(fields, "", passLabel, passField)
 
 		dbLabel := m.styles.Muted.Render("Database:")
-		dbField := m.renderField(6)
+		dbField := m.renderTextField(6, m.databaseInput.View())
 		fields = append(fields, "", dbLabel, dbField)
 	}
 
-	// Error message
 	if m.errorMsg != "" {
 		fields = append(fields, "", m.styles.Error.Render(m.errorMsg))
 	}
 
-	// Help text
-	fields = append(fields, "", m.styles.Muted.Render("Tab: Navigate | Enter: Connect | Esc: Cancel"))
+	// Dynamic help text based on current field
+	helpText := "Tab: Navigate | Esc: Cancel"
+	if m.focusIndex == 0 && m.showDbList {
+		helpText = "↑↓: Select | Enter: Confirm | Esc: Cancel"
+	} else if m.focusIndex == m.getMaxFieldIndex() {
+		helpText = "Tab: Navigate | Enter: Connect | Esc: Cancel"
+	}
+	fields = append(fields, "", m.styles.Muted.Render(helpText))
 
 	formContent := lipgloss.JoinVertical(lipgloss.Left, fields...)
 	modalContent := lipgloss.JoinVertical(lipgloss.Left, title, "", formContent)
@@ -339,59 +441,60 @@ func (m *ConnectModel) viewForm() string {
 	return centerStyle.Render(modalStyle.Render(modalContent))
 }
 
-func (m *ConnectModel) viewConnecting() string {
-	// Center everything
-	centerStyle := lipgloss.NewStyle().
-		Width(m.width).
-		Height(m.height).
-		Align(lipgloss.Center, lipgloss.Center)
-
-	// Spinner + text
-	spinnerText := m.spinner.View() + " Connecting..."
-	content := m.styles.Body.Render(spinnerText)
-
-	return centerStyle.Render(content)
-}
-
-func (m *ConnectModel) renderField(index int) string {
-	var value string
-	var isFocused bool
-
-	switch index {
-	case 0:
-		value = m.dbTypeInput.View()
-		isFocused = m.focusIndex == 0
-	case 1:
-		value = m.pathInput.View()
-		isFocused = m.focusIndex == 1
-	case 2:
-		value = m.hostInput.View()
-		isFocused = m.focusIndex == 2
-	case 3:
-		value = m.portInput.View()
-		isFocused = m.focusIndex == 3
-	case 4:
-		value = m.userInput.View()
-		isFocused = m.focusIndex == 4
-	case 5:
-		value = m.passwordInput.View()
-		isFocused = m.focusIndex == 5
-	case 6:
-		value = m.databaseInput.View()
-		isFocused = m.focusIndex == 6
-	}
-
-	if isFocused {
+func (m *ConnectModel) renderTextField(index int, value string) string {
+	if m.focusIndex == index {
 		return m.styles.InputFocus.Render(value)
 	}
 	return m.styles.Input.Render(value)
 }
 
+func (m *ConnectModel) viewConnecting() string {
+	// Fallback dimensions if not set
+	width := m.width
+	height := m.height
+	if width == 0 {
+		width = 80
+	}
+	if height == 0 {
+		height = 24
+	}
+
+	centerStyle := lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Align(lipgloss.Center, lipgloss.Center)
+
+	if m.errorMsg != "" {
+		// Show error if connection failed
+		content := lipgloss.JoinVertical(
+			lipgloss.Center,
+			m.styles.Error.Render("Connection Failed:"),
+			m.styles.Body.Render(m.errorMsg),
+			"",
+			m.styles.Muted.Render("Press any key to return..."),
+		)
+		return centerStyle.Render(content)
+	}
+
+	// Use simple spinner frames
+	frames := []string{"⎛", "⎜", "⎝", "⎞", "⎟", "⎠"}
+	frame := frames[m.spinnerFrame%len(frames)]
+
+	spinnerText := lipgloss.NewStyle().Foreground(styles.Primary).Render(frame) + "  Connecting to database..."
+	content := lipgloss.JoinVertical(
+		lipgloss.Center,
+		m.styles.Body.Render(spinnerText),
+		"",
+		m.styles.Muted.Render("Please wait..."),
+	)
+
+	return centerStyle.Render(content)
+}
+
 // Helper methods
 
 func (m *ConnectModel) isSQLite() bool {
-	dbType := m.dbTypeInput.Value()
-	return dbType == "" || dbType == "sqlite" || dbType == "SQLite"
+	return strings.EqualFold(m.selectedDb, "SQLite")
 }
 
 func (m *ConnectModel) getMaxFieldIndex() int {
@@ -401,21 +504,13 @@ func (m *ConnectModel) getMaxFieldIndex() int {
 	return 6 // all PostgreSQL fields
 }
 
-func (m *ConnectModel) adjustFocusForDbType() {
-	maxIndex := m.getMaxFieldIndex()
-	if m.focusIndex > maxIndex {
-		m.focusIndex = maxIndex
-		m.blurAllFields()
-		m.focusCurrentField()
-	}
-}
-
 func (m *ConnectModel) nextField() {
 	m.blurCurrentField()
 	maxIndex := m.getMaxFieldIndex()
 	m.focusIndex++
 	if m.focusIndex > maxIndex {
 		m.focusIndex = 0
+		m.showDbList = true
 	}
 	m.focusCurrentField()
 }
@@ -426,14 +521,16 @@ func (m *ConnectModel) prevField() {
 	m.focusIndex--
 	if m.focusIndex < 0 {
 		m.focusIndex = maxIndex
+		m.showDbList = false
+	}
+	if m.focusIndex == 0 {
+		m.showDbList = true
 	}
 	m.focusCurrentField()
 }
 
 func (m *ConnectModel) blurCurrentField() {
 	switch m.focusIndex {
-	case 0:
-		m.dbTypeInput.Blur()
 	case 1:
 		m.pathInput.Blur()
 	case 2:
@@ -450,7 +547,6 @@ func (m *ConnectModel) blurCurrentField() {
 }
 
 func (m *ConnectModel) blurAllFields() {
-	m.dbTypeInput.Blur()
 	m.pathInput.Blur()
 	m.hostInput.Blur()
 	m.portInput.Blur()
@@ -461,8 +557,6 @@ func (m *ConnectModel) blurAllFields() {
 
 func (m *ConnectModel) focusCurrentField() {
 	switch m.focusIndex {
-	case 0:
-		m.dbTypeInput.Focus()
 	case 1:
 		m.pathInput.Focus()
 	case 2:
@@ -481,21 +575,27 @@ func (m *ConnectModel) focusCurrentField() {
 func (m *ConnectModel) startConnection() tea.Cmd {
 	m.state = StateConnecting
 	m.errorMsg = ""
+	m.spinnerFrame = 0
 
-	// Start spinner
-	spinnerCmd := m.spinner.Tick
-
-	// Start connection
+	// Get config
 	config := m.getConfig()
-	connectCmd := func() tea.Msg {
-		database, err := db.Open(config)
-		if err != nil {
-			return ConnectErrorMsg{Err: err.Error()}
-		}
-		return ConnectSuccessMsg{DB: database}
-	}
 
-	return tea.Batch(spinnerCmd, connectCmd)
+	// Start spinner animation
+	spinnerCmd := tea.Tick(time.Second/8, func(t time.Time) tea.Msg {
+		return spinner.TickMsg{}
+	})
+
+	return tea.Batch(
+		spinnerCmd,
+		func() tea.Msg {
+			// Attempt connection
+			database, err := db.Open(config)
+			if err != nil {
+				return ConnectErrorMsg{Err: err.Error()}
+			}
+			return ConnectSuccessMsg{DB: database}
+		},
+	)
 }
 
 func (m *ConnectModel) getConfig() models.ConnectionConfig {
@@ -504,8 +604,13 @@ func (m *ConnectModel) getConfig() models.ConnectionConfig {
 		port = 5432
 	}
 
+	dbType := "sqlite"
+	if !m.isSQLite() {
+		dbType = "postgres"
+	}
+
 	return models.ConnectionConfig{
-		Type:     m.dbTypeInput.Value(),
+		Type:     dbType,
 		Path:     m.pathInput.Value(),
 		Host:     m.hostInput.Value(),
 		Port:     port,
@@ -516,7 +621,6 @@ func (m *ConnectModel) getConfig() models.ConnectionConfig {
 }
 
 // Message types
-
 type ConnectSuccessMsg struct {
 	DB db.Database
 }

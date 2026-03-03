@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
 
 func TestNewConnectModel(t *testing.T) {
@@ -14,26 +13,17 @@ func TestNewConnectModel(t *testing.T) {
 		t.Fatal("NewConnectModel() returned nil")
 	}
 
-	// Check that all inputs are initialized
-	if m.dbTypeInput.Placeholder != "sqlite" {
-		t.Errorf("dbTypeInput placeholder = %v, want %v", m.dbTypeInput.Placeholder, "sqlite")
-	}
-
-	if m.pathInput.Placeholder != "path/to/database.db" {
-		t.Errorf("pathInput placeholder = %v, want %v", m.pathInput.Placeholder, "path/to/database.db")
-	}
-
 	// Check initial state
+	if m.state != StateWelcome {
+		t.Errorf("state = %v, want %v", m.state, StateWelcome)
+	}
+
 	if m.focusIndex != 0 {
 		t.Errorf("focusIndex = %v, want %v", m.focusIndex, 0)
 	}
 
-	if m.isConnecting {
-		t.Error("isConnecting should be false initially")
-	}
-
-	if m.styles == nil {
-		t.Error("styles should be initialized")
+	if m.selectedDb != "SQLite" {
+		t.Errorf("selectedDb = %v, want %v", m.selectedDb, "SQLite")
 	}
 }
 
@@ -41,13 +31,16 @@ func TestConnectModel_Init(t *testing.T) {
 	m := NewConnectModel()
 	cmd := m.Init()
 
-	if cmd == nil {
-		t.Error("Init() should return a command (textinput.Blink)")
+	// Init should return nil now
+	if cmd != nil {
+		t.Error("Init() should return nil")
 	}
 }
 
 func TestConnectModel_Navigation(t *testing.T) {
 	m := NewConnectModel()
+	m.state = StateForm
+	m.showDbList = false
 
 	// Test nextField
 	m.nextField()
@@ -60,256 +53,136 @@ func TestConnectModel_Navigation(t *testing.T) {
 	if m.focusIndex != 0 {
 		t.Errorf("after prevField(), focusIndex = %v, want %v", m.focusIndex, 0)
 	}
-
-	// Test wrap around (prev from 0 should go to last field)
-	m.prevField()
-	if m.focusIndex != 6 {
-		t.Errorf("after prevField() from 0, focusIndex = %v, want %v (last field)", m.focusIndex, 6)
-	}
-
-	// Test wrap around (next from last should go to 0)
-	m.nextField()
-	if m.focusIndex != 0 {
-		t.Errorf("after nextField() from last, focusIndex = %v, want %v", m.focusIndex, 0)
-	}
 }
 
-func TestConnectModel_Update_KeyMsg(t *testing.T) {
+func TestConnectModel_Update_WelcomeState(t *testing.T) {
 	m := NewConnectModel()
+
+	// Test Space key to open form
+	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	cm := newM.(*ConnectModel)
+
+	if cm.state != StateForm {
+		t.Errorf("Space should switch to StateForm, got state = %v", cm.state)
+	}
+	if cmd != nil {
+		t.Error("Space should not return a command")
+	}
+
+	// Test Ctrl+C - this is handled at the app level in app.go
+	// The connect screen doesn't handle Ctrl+C directly
+	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_ = newM
+	_ = cmd
+}
+
+func TestConnectModel_Update_FormState(t *testing.T) {
+	m := NewConnectModel()
+	m.state = StateForm
+	m.showDbList = false
 
 	// Test Tab key
 	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if newM.(*ConnectModel).focusIndex != 1 {
-		t.Errorf("Tab should move to next field, got focusIndex = %v", newM.(*ConnectModel).focusIndex)
+	cm := newM.(*ConnectModel)
+	if cm.focusIndex != 1 {
+		t.Errorf("Tab should move to next field, got focusIndex = %v", cm.focusIndex)
 	}
 	if cmd != nil {
 		t.Error("Tab should not return a command")
 	}
 
-	// Test Shift+Tab key
-	newM, cmd = newM.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-	if newM.(*ConnectModel).focusIndex != 0 {
-		t.Errorf("Shift+Tab should move to previous field, got focusIndex = %v", newM.(*ConnectModel).focusIndex)
-	}
-
-	// Test Up key
-	newM, cmd = newM.Update(tea.KeyMsg{Type: tea.KeyUp})
-	if newM.(*ConnectModel).focusIndex != 6 {
-		t.Errorf("Up should move to previous field, got focusIndex = %v", newM.(*ConnectModel).focusIndex)
-	}
-
-	// Test Down key
-	newM, cmd = newM.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if newM.(*ConnectModel).focusIndex != 0 {
-		t.Errorf("Down should move to next field, got focusIndex = %v", newM.(*ConnectModel).focusIndex)
+	// Test Esc key to go back to welcome
+	newM, cmd = cm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	cm = newM.(*ConnectModel)
+	if cm.state != StateWelcome {
+		t.Errorf("Esc should switch to StateWelcome, got state = %v", cm.state)
 	}
 }
 
-func TestConnectModel_Update_WindowSize(t *testing.T) {
-	m := NewConnectModel()
-
-	// Test WindowSizeMsg
-	newM, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
-	if cmd != nil {
-		t.Error("WindowSizeMsg should not return a command")
+func TestConnectModel_isSQLite(t *testing.T) {
+	tests := []struct {
+		name       string
+		selectedDb string
+		want       bool
+	}{
+		{"SQLite selected", "SQLite", true},
+		{"sqlite lowercase", "sqlite", true},
+		{"PostgreSQL selected", "PostgreSQL", false},
+		{"postgres lowercase", "postgres", false},
 	}
 
-	cm := newM.(*ConnectModel)
-	if cm.width != 100 {
-		t.Errorf("width = %v, want %v", cm.width, 100)
-	}
-	if cm.height != 50 {
-		t.Errorf("height = %v, want %v", cm.height, 50)
-	}
-}
-
-func TestConnectModel_Update_ConnectError(t *testing.T) {
-	m := NewConnectModel()
-	m.isConnecting = true
-
-	// Test ConnectErrorMsg
-	errMsg := ConnectErrorMsg{Error: "connection failed"}
-	newM, cmd := m.Update(errMsg)
-	if cmd != nil {
-		t.Error("ConnectErrorMsg should not return a command")
-	}
-
-	cm := newM.(*ConnectModel)
-	if cm.isConnecting {
-		t.Error("isConnecting should be false after error")
-	}
-	if cm.errorMsg != "connection failed" {
-		t.Errorf("errorMsg = %v, want %v", cm.errorMsg, "connection failed")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewConnectModel()
+			m.selectedDb = tt.selectedDb
+			if got := m.isSQLite(); got != tt.want {
+				t.Errorf("isSQLite() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
-func TestConnectModel_View(t *testing.T) {
-	m := NewConnectModel()
-
-	view := m.View()
-	if view == "" {
-		t.Error("View() should return a non-empty string")
+func TestConnectModel_getMaxFieldIndex(t *testing.T) {
+	tests := []struct {
+		name       string
+		selectedDb string
+		want       int
+	}{
+		{"SQLite", "SQLite", 1},
+		{"PostgreSQL", "PostgreSQL", 6},
 	}
 
-	// Check that the title is included
-	if !contains(view, "Tornado - Database Connection") {
-		t.Error("View should contain the title")
-	}
-
-	// Check that all fields are rendered
-	if !contains(view, "Database Type") {
-		t.Error("View should contain Database Type field")
-	}
-	if !contains(view, "File Path") {
-		t.Error("View should contain File Path field")
-	}
-	if !contains(view, "Host") {
-		t.Error("View should contain Host field")
-	}
-	if !contains(view, "Port") {
-		t.Error("View should contain Port field")
-	}
-}
-
-func TestConnectModel_View_WithError(t *testing.T) {
-	m := NewConnectModel()
-	m.errorMsg = "test error"
-
-	view := m.View()
-	if !contains(view, "test error") {
-		t.Error("View should display the error message")
-	}
-}
-
-func TestConnectModel_View_WhileConnecting(t *testing.T) {
-	m := NewConnectModel()
-	m.isConnecting = true
-
-	view := m.View()
-	if !contains(view, "Connecting") {
-		t.Error("View should show connecting message")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewConnectModel()
+			m.selectedDb = tt.selectedDb
+			if got := m.getMaxFieldIndex(); got != tt.want {
+				t.Errorf("getMaxFieldIndex() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
 func TestConnectModel_getConfig(t *testing.T) {
 	m := NewConnectModel()
+	m.selectedDb = "SQLite"
+	m.pathInput.SetValue("/test/db.sqlite")
 
-	// Set some values
-	m.dbTypeInput.SetValue("postgres")
+	config := m.getConfig()
+
+	if config.Type != "sqlite" {
+		t.Errorf("config.Type = %v, want %v", config.Type, "sqlite")
+	}
+	if config.Path != "/test/db.sqlite" {
+		t.Errorf("config.Path = %v, want %v", config.Path, "/test/db.sqlite")
+	}
+
+	// Test PostgreSQL config
+	m.selectedDb = "PostgreSQL"
 	m.hostInput.SetValue("localhost")
-	m.portInput.SetValue("5433")
+	m.portInput.SetValue("5432")
 	m.userInput.SetValue("admin")
 	m.passwordInput.SetValue("secret")
 	m.databaseInput.SetValue("mydb")
-	m.pathInput.SetValue("/tmp/test.db")
 
-	config := m.getConfig()
+	config = m.getConfig()
 
 	if config.Type != "postgres" {
-		t.Errorf("Type = %v, want %v", config.Type, "postgres")
+		t.Errorf("config.Type = %v, want %v", config.Type, "postgres")
 	}
 	if config.Host != "localhost" {
-		t.Errorf("Host = %v, want %v", config.Host, "localhost")
+		t.Errorf("config.Host = %v, want %v", config.Host, "localhost")
 	}
-	if config.Port != 5433 {
-		t.Errorf("Port = %v, want %v", config.Port, 5433)
+	if config.Port != 5432 {
+		t.Errorf("config.Port = %v, want %v", config.Port, 5432)
 	}
 	if config.User != "admin" {
-		t.Errorf("User = %v, want %v", config.User, "admin")
+		t.Errorf("config.User = %v, want %v", config.User, "admin")
 	}
 	if config.Password != "secret" {
-		t.Errorf("Password = %v, want %v", config.Password, "secret")
+		t.Errorf("config.Password = %v, want %v", config.Password, "secret")
 	}
 	if config.Database != "mydb" {
-		t.Errorf("Database = %v, want %v", config.Database, "mydb")
-	}
-}
-
-func TestConnectModel_getConfig_DefaultPort(t *testing.T) {
-	m := NewConnectModel()
-
-	// Empty port should default to 5432
-	m.portInput.SetValue("")
-	config := m.getConfig()
-
-	if config.Port != 5432 {
-		t.Errorf("Port = %v, want default %v", config.Port, 5432)
-	}
-}
-
-func TestConnectModel_handleEnter_NotLastField(t *testing.T) {
-	m := NewConnectModel()
-	m.focusIndex = 0
-
-	newM, cmd := m.handleEnter()
-	if cmd != nil {
-		t.Error("handleEnter on non-last field should not return a command")
-	}
-
-	cm := newM.(*ConnectModel)
-	if cm.focusIndex != 1 {
-		t.Errorf("handleEnter should move to next field, got focusIndex = %v", cm.focusIndex)
-	}
-}
-
-func TestConnectModel_handleEnter_LastField(t *testing.T) {
-	m := NewConnectModel()
-	m.focusIndex = 6
-
-	newM, cmd := m.handleEnter()
-	if cmd == nil {
-		t.Error("handleEnter on last field should return a command")
-	}
-
-	cm := newM.(*ConnectModel)
-	if !cm.isConnecting {
-		t.Error("isConnecting should be true after handleEnter on last field")
-	}
-}
-
-func TestConnectModel_startConnection(t *testing.T) {
-	m := NewConnectModel()
-
-	cmd := m.startConnection()
-	if cmd == nil {
-		t.Error("startConnection() should return a command")
-	}
-
-	if !m.isConnecting {
-		t.Error("isConnecting should be true after startConnection()")
-	}
-
-	if m.errorMsg != "" {
-		t.Error("errorMsg should be cleared after startConnection()")
-	}
-}
-
-// Helper function
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-// TestStyles is used to verify styles are properly initialized
-func TestNewConnectModel_Styles(t *testing.T) {
-	m := NewConnectModel()
-
-	if m.styles == nil {
-		t.Fatal("styles should be initialized")
-	}
-
-	// Verify styles are the default styles
-	defaultStyles := styles.Default()
-	if m.styles != defaultStyles {
-		// They should be the same since we use Default()
-		t.Log("Note: styles instance may differ but should have same values")
+		t.Errorf("config.Database = %v, want %v", config.Database, "mydb")
 	}
 }

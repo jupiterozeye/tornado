@@ -25,6 +25,7 @@ package screens
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -185,6 +186,10 @@ func (m *BrowserModel) View() string {
 	queryStyle := m.layoutManager.GetQueryStyle(m.focusedPane == PaneQuery)
 	resultsStyle := m.layoutManager.GetResultsStyle(m.focusedPane == PaneResults)
 
+	_, _, ew, eh := m.layoutManager.GetExplorerBounds()
+	_, _, qw, qh := m.layoutManager.GetQueryBounds()
+	_, _, rw, rh := m.layoutManager.GetResultsBounds()
+
 	// Render explorer
 	var explorerContent string
 	if m.explorer != nil {
@@ -192,14 +197,14 @@ func (m *BrowserModel) View() string {
 	} else {
 		explorerContent = "Loading..."
 	}
-	explorerPane := explorerStyle.Render(explorerContent)
+	explorerPane := explorerStyle.Render(m.decoratePane("Explorer", "e", explorerContent, ew, eh))
 
 	// Render query editor
-	queryPane := queryStyle.Render(m.query.View())
+	queryPane := queryStyle.Render(m.decoratePane("Query", "q", m.query.View(), qw, qh))
 
 	// Render results
 	resultsContent := m.renderResults()
-	resultsPane := resultsStyle.Render(resultsContent)
+	resultsPane := resultsStyle.Render(m.decoratePane("Results", "r", resultsContent, rw, rh))
 
 	// Combine right side panes vertically
 	rightSide := lipgloss.JoinVertical(
@@ -214,6 +219,59 @@ func (m *BrowserModel) View() string {
 		explorerPane,
 		rightSide,
 	)
+}
+
+func (m *BrowserModel) decoratePane(title, key, content string, paneWidth, paneHeight int) string {
+	innerWidth := paneWidth - 4   // borders + horizontal padding
+	innerHeight := paneHeight - 3 // borders + header row
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	if innerHeight < 1 {
+		innerHeight = 1
+	}
+
+	header := m.styles.Muted.Render(fmt.Sprintf("(%s) %s", key, title))
+	body := clipText(content, innerWidth, innerHeight)
+	return lipgloss.JoinVertical(lipgloss.Left, header, body)
+}
+
+func clipText(content string, width, height int) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for i := range lines {
+		lines[i] = truncateToWidth(lines[i], width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func truncateToWidth(s string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+
+	max := width
+	if width > 1 {
+		max = width - 1
+	}
+
+	var b strings.Builder
+	for _, r := range s {
+		next := b.String() + string(r)
+		if lipgloss.Width(next) > max {
+			break
+		}
+		b.WriteRune(r)
+	}
+	if width > 1 {
+		return b.String() + "…"
+	}
+	return b.String()
 }
 
 // Helper methods

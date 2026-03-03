@@ -5,13 +5,10 @@
 package app
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jupiterozeye/tornado/internal/db"
-	//"github.com/jupiterozeye/tornado/internal/models"
 	"github.com/jupiterozeye/tornado/internal/ui/screens"
 	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
@@ -109,6 +106,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.browserScreen = screens.NewBrowserModel(a.db)
 		a.queryScreen = screens.NewQueryModel(a.db)
 		a.dashboardScreen = screens.NewDashboardModel(a.db)
+
+		// Ensure the browser gets current dimensions immediately.
+		// Without this it can stay in a "Loading..." state waiting for a resize.
+		w := a.width
+		h := a.height
+		if w == 0 {
+			w = 80
+		}
+		if h == 0 {
+			h = 24
+		}
+		resizedModel, _ := a.browserScreen.Update(tea.WindowSizeMsg{Width: w, Height: h})
+		a.browserScreen = resizedModel.(*screens.BrowserModel)
+
 		a.currentScreen = ScreenBrowser
 		return a, a.browserScreen.Init()
 
@@ -190,9 +201,6 @@ func (a *App) View() string {
 	// Get active screens content
 	content := a.getActiveScreen().View()
 
-	// Render status bar
-	statusBar := a.renderStatusBar()
-
 	if a.err != nil {
 		// Show error overlay
 		return lipgloss.JoinVertical(
@@ -202,20 +210,8 @@ func (a *App) View() string {
 		)
 
 	}
-	// Join vertically
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		content,
-		statusBar,
-	)
-}
 
-func (a *App) renderStatusBar() string {
-	// Show current screen and shortcuts
-	screenName := a.currentScreen.String()
-	return a.styles.StatusBar.Render(
-		fmt.Sprintf(" %s | Tab: Next | q: Quit", screenName),
-	)
+	return content
 }
 
 // ScreenChangeMsg is a message for transitioning between screens.
