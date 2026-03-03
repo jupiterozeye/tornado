@@ -35,6 +35,7 @@ import (
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
+	"github.com/jupiterozeye/tornado/internal/config"
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"
 	"github.com/jupiterozeye/tornado/internal/ui/components"
@@ -537,6 +538,10 @@ func (m *BrowserModel) handleThemeMenuKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 				applyTextAreaStyles(&m.query)
 				applyTableStyles(&m.results)
 				m.statusMsg = "Theme: " + it.name
+				// Save theme preference
+				if cfg := config.Get(); cfg != nil {
+					cfg.SetTheme(it.name)
+				}
 			}
 		}
 		m.themeMenu = false
@@ -837,6 +842,11 @@ func (m *BrowserModel) executeQuery() tea.Cmd {
 	query := m.query.Value()
 	if query == "" {
 		return nil
+	}
+
+	// Save query to history
+	if cfg := config.Get(); cfg != nil {
+		cfg.AddQuery(query)
 	}
 
 	return func() tea.Msg {

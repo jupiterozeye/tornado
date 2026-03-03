@@ -1,15 +1,17 @@
 // Package screens contains the main application screens for Tornado.
 //
 // This file implements the Connection screen - the first screen users see.
-// It provides a clean, minimal interface that opens a modal for connection details.
+// It provides a clean, minimal interface with connection history and file browser.
 package screens
 
 import (
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -17,6 +19,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jupiterozeye/tornado/internal/assets"
+	"github.com/jupiterozeye/tornado/internal/config"
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"
 	"github.com/jupiterozeye/tornado/internal/ui/styles"
@@ -29,6 +32,7 @@ const (
 	StateWelcome ConnectionState = iota
 	StateForm
 	StateConnecting
+	StateFilePicker
 )
 
 // DBTypeItem represents a database type option for the list
@@ -40,6 +44,20 @@ type DBTypeItem struct {
 func (i DBTypeItem) FilterValue() string { return i.name }
 func (i DBTypeItem) Title() string       { return i.name }
 func (i DBTypeItem) Description() string { return i.description }
+
+// ConnectionItem represents a saved connection in the history list
+type ConnectionItem struct {
+	entry config.ConnectionEntry
+}
+
+func (i ConnectionItem) FilterValue() string { return i.entry.Name }
+func (i ConnectionItem) Title() string       { return i.entry.Name }
+func (i ConnectionItem) Description() string {
+	if i.entry.Type == "sqlite" {
+		return "SQLite: " + i.entry.Path
+	}
+	return "PostgreSQL: " + i.entry.Host
+}
 
 // ConnectModel is the model for the connection screen.
 type ConnectModel struct {
@@ -54,6 +72,15 @@ type ConnectModel struct {
 	userInput     textinput.Model
 	passwordInput textinput.Model
 	databaseInput textinput.Model
+
+	// Connection history
+	showHistory    bool
+	connectionList list.Model
+	connections    []config.ConnectionEntry
+
+	// File picker
+	filepicker     filepicker.Model
+	showFilePicker bool
 
 	// UI state
 	focusIndex int // 0=dbType, 1=path, 2=host, 3=port, 4=user, 5=password, 6=database
@@ -134,26 +161,86 @@ func NewConnectModel() *ConnectModel {
 	database.Placeholder = "database"
 	database.CharLimit = 50
 
-	return &ConnectModel{
-		state:         StateWelcome,
-		styles:        s,
-		spinner:       sp,
-		dbTypeList:    dbList,
-		pathInput:     path,
-		hostInput:     host,
-		portInput:     port,
-		userInput:     user,
-		passwordInput: password,
-		databaseInput: database,
-		focusIndex:    0,
-		showDbList:    true,
-		selectedDb:    "SQLite",
+	// Initialize file picker
+	fp := filepicker.New()
+	fp.AllowedTypes = []string{".db", ".sqlite", ".sqlite3", ".db3"}
+	homeDir, _ := os.UserHomeDir()
+	fp.CurrentDirectory = homeDir
+
+	// Load connection history
+	connections := []config.ConnectionEntry{}
+	if cfg := config.Get(); cfg != nil {
+		connections = cfg.GetConnections()
+	}
+
+	// Create connection history list
+	var connItems []list.Item
+	for _, conn := range connections {
+		connItems = append(connItems, ConnectionItem{entry: conn})
+	}
+
+	connList := list.New(connItems, list.NewDefaultDelegate(), 50, 6)
+	connList.Title = "Recent Connections"
+	connList.SetShowStatusBar(false)
+	connList.SetShowHelp(false)
+	connList.SetShowPagination(false)
+	connList.SetFilteringEnabled(false)
+	connList.SetShowTitle(true)
+
+	m := &ConnectModel{
+		state:          StateWelcome,
+		styles:         s,
+		spinner:        sp,
+		dbTypeList:     dbList,
+		pathInput:      path,
+		hostInput:      host,
+		portInput:      port,
+		userInput:      user,
+		passwordInput:  password,
+		databaseInput:  database,
+		filepicker:     fp,
+		focusIndex:     0,
+		showDbList:     true,
+		selectedDb:     "SQLite",
+		showHistory:    len(connections) > 0,
+		connectionList: connList,
+		connections:    connections,
+	}
+
+	// Pre-fill with most recent connection if available
+	if len(connections) > 0 {
+		m.fillFormFromHistory(connections[0])
+	}
+
+	return m
+}
+
+// fillFormFromHistory fills the form fields from a connection entry
+func (m *ConnectModel) fillFormFromHistory(entry config.ConnectionEntry) {
+	if entry.Type == "sqlite" {
+		m.selectedDb = "SQLite"
+		dbIndex := 0
+		m.dbTypeList.Select(dbIndex)
+		m.pathInput.SetValue(entry.Path)
+	} else {
+		m.selectedDb = "PostgreSQL"
+		dbIndex := 1
+		m.dbTypeList.Select(dbIndex)
+		m.hostInput.SetValue(entry.Host)
+		if entry.Port != 0 {
+			m.portInput.SetValue(strconv.Itoa(entry.Port))
+		}
+		m.userInput.SetValue(entry.User)
+		m.databaseInput.SetValue(entry.Database)
 	}
 }
 
 // Init returns the initial command for the connection screen.
 func (m *ConnectModel) Init() tea.Cmd {
-	return connectAnimTick()
+	return tea.Batch(
+		connectAnimTick(),
+		m.filepicker.Init(),
+	)
 }
 
 // Update handles messages for the connection screen.
@@ -175,6 +262,29 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "ctrl+c":
 				return m, tea.Quit
 			}
+
+		case StateFilePicker:
+			switch msg.String() {
+			case "esc", "q":
+				m.state = StateForm
+				m.showFilePicker = false
+				return m, nil
+			case "ctrl+c":
+				return m, tea.Quit
+			}
+
+			var cmd tea.Cmd
+			m.filepicker, cmd = m.filepicker.Update(msg)
+
+			// Check if user selected a file
+			if didSelect, path := m.filepicker.DidSelectFile(msg); didSelect {
+				m.pathInput.SetValue(path)
+				m.state = StateForm
+				m.showFilePicker = false
+				return m, nil
+			}
+
+			return m, cmd
 
 		case StateForm:
 			return m.handleFormKeys(msg)
@@ -203,6 +313,10 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Pass through connection messages so they bubble up to App
 	case ConnectSuccessMsg:
+		// Save successful connection to history
+		if cfg := config.Get(); cfg != nil {
+			cfg.AddConnection(m.getConfig())
+		}
 		return m, func() tea.Msg { return msg }
 
 	case ConnectErrorMsg:
@@ -210,24 +324,33 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return msg }
 	}
 
-	// Pass messages to DB list if showing
-	if m.state == StateForm && m.showDbList && m.focusIndex == 0 {
-		var cmd tea.Cmd
-		newListModel, cmd := m.dbTypeList.Update(msg)
-		m.dbTypeList = newListModel
+	// Pass messages to active lists
+	if m.state == StateForm {
+		if m.showDbList && m.focusIndex == 0 {
+			var cmd tea.Cmd
+			newListModel, cmd := m.dbTypeList.Update(msg)
+			m.dbTypeList = newListModel
 
-		// Check if an item was selected
-		if item, ok := m.dbTypeList.SelectedItem().(DBTypeItem); ok {
-			if item.name != m.selectedDb {
-				m.selectedDb = item.name
-				// Reset other fields when switching DB types
-				if m.selectedDb == "SQLite" {
-					m.focusIndex = 0
+			// Check if an item was selected
+			if item, ok := m.dbTypeList.SelectedItem().(DBTypeItem); ok {
+				if item.name != m.selectedDb {
+					m.selectedDb = item.name
+					// Reset other fields when switching DB types
+					if m.selectedDb == "SQLite" {
+						m.focusIndex = 0
+					}
 				}
 			}
+
+			return m, cmd
 		}
 
-		return m, cmd
+		if m.showHistory {
+			var cmd tea.Cmd
+			newListModel, cmd := m.connectionList.Update(msg)
+			m.connectionList = newListModel
+			return m, cmd
+		}
 	}
 
 	return m, nil
@@ -239,6 +362,7 @@ func (m *ConnectModel) handleFormKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.state = StateWelcome
 		m.blurAllFields()
 		m.errorMsg = ""
+		m.showHistory = false
 		return m, nil
 
 	case "tab":
@@ -266,22 +390,56 @@ func (m *ConnectModel) handleFormKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 
 	case "enter":
+		// Handle history list selection
+		if m.showHistory {
+			if item, ok := m.connectionList.SelectedItem().(ConnectionItem); ok {
+				m.fillFormFromHistory(item.entry)
+				m.showHistory = false
+				return m, nil
+			}
+		}
+
 		if m.focusIndex == 0 && m.showDbList {
 			// Select DB type and move to next field
 			m.showDbList = false
 			m.nextField()
 			return m, nil
 		}
+
+		// Handle path field - open file picker for SQLite
+		if m.focusIndex == 1 && m.isSQLite() {
+			m.state = StateFilePicker
+			m.showFilePicker = true
+			return m, nil
+		}
+
 		if m.focusIndex == m.getMaxFieldIndex() {
 			return m, m.startConnection()
 		}
 		m.nextField()
 		return m, nil
 
+	case "ctrl+b":
+		// Browse button for SQLite path
+		if m.isSQLite() {
+			m.state = StateFilePicker
+			m.showFilePicker = true
+			return m, nil
+		}
+
+	case "ctrl+h":
+		// Toggle connection history
+		if len(m.connections) > 0 {
+			m.showHistory = !m.showHistory
+			return m, nil
+		}
+
 	default:
 		// Update the focused text input
 		return m.updateFocusedInput(msg)
 	}
+
+	return m, nil
 }
 
 func (m *ConnectModel) updateFocusedInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -313,6 +471,8 @@ func (m *ConnectModel) View() tea.View {
 		content = m.viewFormScreen()
 	case StateConnecting:
 		content = m.viewConnectingScreen()
+	case StateFilePicker:
+		content = m.viewFilePickerScreen()
 	default:
 		content = m.viewWelcome()
 	}
@@ -321,10 +481,9 @@ func (m *ConnectModel) View() tea.View {
 	return v
 }
 
-// viewFormScreen renders the form dialog on a solid background (no animation)
+// viewFormScreen renders the form dialog on a solid background
 func (m *ConnectModel) viewFormScreen() string {
 	dialog := m.viewForm()
-	// Center the dialog on top of solid background using pure composition
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog,
 		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(styles.BgDefault)))
 }
@@ -336,22 +495,47 @@ func (m *ConnectModel) viewConnectingScreen() string {
 		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(styles.BgDefault)))
 }
 
-// viewWelcomeBackground returns a solid background with logo and help (no animation)
-func (m *ConnectModel) viewWelcomeBackground() string {
-	logoStyle := lipgloss.NewStyle().Foreground(styles.Primary)
-	logo := logoStyle.Render(assets.Logo)
+// viewFilePickerScreen renders the file picker modal overlay
+func (m *ConnectModel) viewFilePickerScreen() string {
+	// First render the form as background
+	background := m.viewFormScreen()
 
-	helpStyle := lipgloss.NewStyle().
-		Foreground(styles.TextMuted).
-		MarginTop(2)
-	help := helpStyle.Render("Space: Connect | Ctrl+C: Quit")
+	// Then render the file picker as a modal on top
+	pickerContent := m.viewFilePicker()
 
-	fullLogo := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, logo)
-	fullHelp := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help)
-	content := lipgloss.JoinVertical(lipgloss.Left, fullLogo, fullHelp)
+	// Composite the picker on top of the background
+	return compositeOverlay(background, pickerContent, m.width, m.height)
+}
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
-		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(styles.BgDefault)))
+// viewFilePicker renders the file picker dialog
+func (m *ConnectModel) viewFilePicker() string {
+	bodyWidth := 60
+
+	var content []string
+
+	// Title
+	title := m.styles.Header.Render("Select Database File")
+	content = append(content, title)
+	content = append(content, "")
+
+	// Current directory
+	dirStyle := lipgloss.NewStyle().Foreground(styles.TextMuted)
+	content = append(content, dirStyle.Render("Current: "+m.filepicker.CurrentDirectory))
+	content = append(content, "")
+
+	// File picker view
+	pickerView := m.filepicker.View()
+	content = append(content, pickerView)
+
+	// Help
+	content = append(content, "")
+	helpStyle := lipgloss.NewStyle().Foreground(styles.TextMuted)
+	content = append(content, helpStyle.Render("enter: select • esc: cancel"))
+
+	body := strings.Join(content, "\n")
+
+	// Build dialog box
+	return renderDialogBox("File Browser", []string{body}, "ctrl+c quit", bodyWidth)
 }
 
 func (m *ConnectModel) viewWelcome() string {
@@ -368,7 +552,6 @@ func (m *ConnectModel) viewWelcome() string {
 	fullHelp := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help)
 	content := lipgloss.JoinVertical(lipgloss.Left, fullLogo, anim, fullHelp)
 
-	// Use lipgloss.Place to fill the full terminal so ANSI overlays work
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
@@ -411,7 +594,6 @@ func (m *ConnectModel) renderTornadoAnimation() string {
 	n := len(tornadoAnimLines)
 	for i, line := range tornadoAnimLines {
 		funnel := math.Pow(float64(i)/float64(maxConnectInt(1, n-1)), 1.2)
-		// Stronger top spin, softer bottom sway.
 		topWeight := 1.0 - funnel
 		amp := 5.0*topWeight + 2.0*funnel
 		phase := m.animT*3.1 + float64(i)*0.55
@@ -448,9 +630,19 @@ func maxConnectInt(a, b int) int {
 
 func (m *ConnectModel) viewForm() string {
 	isSQLite := m.isSQLite()
-	bodyWidth := 50
+	bodyWidth := 52
 	fieldWidth := bodyWidth - 2
 	var fields []string
+
+	// Show connection history if available and toggled
+	if m.showHistory && len(m.connections) > 0 {
+		m.connectionList.SetWidth(fieldWidth - 4)
+		m.connectionList.SetHeight(6)
+		historySection := m.styles.Subheader.Render("Recent Connections (Ctrl+H to toggle)")
+		fields = append(fields, historySection)
+		fields = append(fields, m.connectionList.View())
+		fields = append(fields, "")
+	}
 
 	if m.showDbList && m.focusIndex == 0 {
 		m.dbTypeList.SetWidth(fieldWidth - 4)
@@ -465,8 +657,13 @@ func (m *ConnectModel) viewForm() string {
 	}
 
 	if isSQLite {
+		// Path field with browse button hint
 		pathValue := m.displayInput(&m.pathInput, m.focusIndex == 1)
-		fields = append(fields, m.renderFieldContainer("Database File", pathValue, m.focusIndex == 1, fieldWidth))
+		pathLabel := "Database File"
+		if m.focusIndex == 1 {
+			pathLabel += " (Ctrl+B to browse)"
+		}
+		fields = append(fields, m.renderFieldContainer(pathLabel, pathValue, m.focusIndex == 1, fieldWidth))
 	} else {
 		fields = append(fields,
 			m.renderFieldContainer("Host", m.displayInput(&m.hostInput, m.focusIndex == 2), m.focusIndex == 2, fieldWidth),
@@ -485,17 +682,18 @@ func (m *ConnectModel) viewForm() string {
 	if m.focusIndex == 0 && m.showDbList {
 		helpText = "up/down Select · enter Confirm · esc Cancel"
 	} else if m.focusIndex == m.getMaxFieldIndex() {
-		helpText = "enter Connect · tab Previous fields · esc Cancel"
+		helpText = "enter Connect · tab Previous · esc Cancel"
+	}
+
+	if len(m.connections) > 0 && !m.showHistory {
+		helpText += " · ctrl+h History"
+	}
+
+	if isSQLite && m.focusIndex == 1 {
+		helpText = "ctrl+b Browse · " + helpText
 	}
 
 	return renderDialogBox("Connect to Database", fields, helpText, bodyWidth+2)
-}
-
-func (m *ConnectModel) renderTextField(index int, value string) string {
-	if m.focusIndex == index {
-		return m.styles.InputFocus.Render(value)
-	}
-	return m.styles.Input.Render(value)
 }
 
 func (m *ConnectModel) viewConnecting() string {
@@ -534,7 +732,7 @@ func (m *ConnectModel) renderFieldContainer(label, content string, focused bool,
 		Background(styles.BgDark)
 	bodyStyle := lipgloss.NewStyle().Background(styles.BgDark)
 
-	top := makeTopBorder(label, innerWidth)
+	top := makeDialogTopBorder(label, innerWidth)
 	contentLines := strings.Split(content, "\n")
 	if len(contentLines) == 0 {
 		contentLines = []string{""}
@@ -560,32 +758,6 @@ func (m *ConnectModel) displayInput(input *textinput.Model, focused bool) string
 		return input.View()
 	}
 	return input.Placeholder
-}
-
-func (m *ConnectModel) overlayCentered(base, box string) string {
-	if m.width == 0 || m.height == 0 {
-		return box
-	}
-
-	boxLines := strings.Split(box, "\n")
-	boxW := 0
-	for _, line := range boxLines {
-		if w := lipgloss.Width(line); w > boxW {
-			boxW = w
-		}
-	}
-	boxH := len(boxLines)
-
-	x := (m.width - boxW) / 2
-	if x < 0 {
-		x = 0
-	}
-	y := (m.height - boxH) / 2
-	if y < 0 {
-		y = 0
-	}
-
-	return overlayBoxAt(base, box, x, y, m.height)
 }
 
 // Helper methods
@@ -673,6 +845,7 @@ func (m *ConnectModel) startConnection() tea.Cmd {
 	m.state = StateConnecting
 	m.errorMsg = ""
 	m.spinnerFrame = 0
+	m.showHistory = false
 
 	// Get config
 	config := m.getConfig()

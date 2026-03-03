@@ -25,12 +25,10 @@ type ThemePalette struct {
 }
 
 var themeOrder = []string{
-	"sqlit", "sqlit-light", "nord", "gruvbox", "gruvbox-light", "tokyo-night", "solarized-dark", "solarized-light", "catppuccin-mocha", "catppuccin-latte", "rose-pine", "rose-pine-dawn", "dracula", "everforest", "kanagawa", "hackerman", "matte-black", "ristretto", "osaka-jade",
+	"nord", "gruvbox", "gruvbox-light", "tokyo-night", "solarized-dark", "solarized-light", "catppuccin-mocha", "catppuccin-latte", "rose-pine", "rose-pine-dawn", "dracula", "everforest", "kanagawa", "hackerman", "matte-black", "ristretto", "osaka-jade",
 }
 
 var palettes = map[string]ThemePalette{
-	"sqlit":            {"sqlit", lipgloss.Color("151"), lipgloss.Color("66"), lipgloss.Color("68"), lipgloss.Color("68"), lipgloss.Color("77"), lipgloss.Color("214"), lipgloss.Color("168"), lipgloss.Color("74"), lipgloss.Color("251"), lipgloss.Color("246"), lipgloss.Color("255"), lipgloss.Color("151"), lipgloss.Color("235"), lipgloss.Color("234"), lipgloss.Color("237"), lipgloss.Color("239"), lipgloss.Color("68")},
-	"sqlit-light":      {"sqlit-light", lipgloss.Color("28"), lipgloss.Color("24"), lipgloss.Color("24"), lipgloss.Color("24"), lipgloss.Color("28"), lipgloss.Color("208"), lipgloss.Color("160"), lipgloss.Color("24"), lipgloss.Color("238"), lipgloss.Color("245"), lipgloss.Color("16"), lipgloss.Color("24"), lipgloss.Color("254"), lipgloss.Color("255"), lipgloss.Color("252"), lipgloss.Color("249"), lipgloss.Color("24")},
 	"nord":             {"nord", lipgloss.Color("110"), lipgloss.Color("67"), lipgloss.Color("109"), lipgloss.Color("181"), lipgloss.Color("108"), lipgloss.Color("179"), lipgloss.Color("174"), lipgloss.Color("67"), lipgloss.Color("252"), lipgloss.Color("245"), lipgloss.Color("255"), lipgloss.Color("110"), lipgloss.Color("237"), lipgloss.Color("236"), lipgloss.Color("239"), lipgloss.Color("240"), lipgloss.Color("110")},
 	"gruvbox":          {"gruvbox", lipgloss.Color("108"), lipgloss.Color("130"), lipgloss.Color("172"), lipgloss.Color("108"), lipgloss.Color("142"), lipgloss.Color("214"), lipgloss.Color("167"), lipgloss.Color("109"), lipgloss.Color("223"), lipgloss.Color("246"), lipgloss.Color("230"), lipgloss.Color("108"), lipgloss.Color("235"), lipgloss.Color("234"), lipgloss.Color("237"), lipgloss.Color("239"), lipgloss.Color("108")},
 	"gruvbox-light":    {"gruvbox-light", lipgloss.Color("65"), lipgloss.Color("100"), lipgloss.Color("136"), lipgloss.Color("65"), lipgloss.Color("100"), lipgloss.Color("130"), lipgloss.Color("124"), lipgloss.Color("67"), lipgloss.Color("237"), lipgloss.Color("244"), lipgloss.Color("234"), lipgloss.Color("65"), lipgloss.Color("230"), lipgloss.Color("223"), lipgloss.Color("187"), lipgloss.Color("180"), lipgloss.Color("65")},
