@@ -5,6 +5,7 @@
 package screens
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -70,6 +71,15 @@ type ConnectModel struct {
 	// Loading spinner
 	spinner      spinner.Model
 	spinnerFrame int
+	animT        float64
+}
+
+type connectAnimTickMsg time.Time
+
+func connectAnimTick() tea.Cmd {
+	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
+		return connectAnimTickMsg(t)
+	})
 }
 
 // NewConnectModel creates a new connection screen model.
@@ -141,7 +151,7 @@ func NewConnectModel() *ConnectModel {
 
 // Init returns the initial command for the connection screen.
 func (m *ConnectModel) Init() tea.Cmd {
-	return nil
+	return connectAnimTick()
 }
 
 // Update handles messages for the connection screen.
@@ -182,8 +192,12 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		if m.state == StateConnecting {
 			m.spinnerFrame++
-			return m, nil
+			return m, m.spinner.Tick
 		}
+
+	case connectAnimTickMsg:
+		m.animT += 0.06
+		return m, connectAnimTick()
 
 	// Pass through connection messages so they bubble up to App
 	case ConnectSuccessMsg:
@@ -192,26 +206,6 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ConnectErrorMsg:
 		m.errorMsg = msg.Err
 		return m, func() tea.Msg { return msg }
-	}
-
-	// Pass messages to DB list if showing
-	if m.state == StateForm && m.showDbList && m.focusIndex == 0 {
-		var cmd tea.Cmd
-		newListModel, cmd := m.dbTypeList.Update(msg)
-		m.dbTypeList = newListModel
-
-		// Check if an item was selected
-		if item, ok := m.dbTypeList.SelectedItem().(DBTypeItem); ok {
-			if item.name != m.selectedDb {
-				m.selectedDb = item.name
-				// Reset other fields when switching DB types
-				if m.selectedDb == "SQLite" {
-					m.focusIndex = 0
-				}
-			}
-		}
-
-		return m, cmd
 	}
 
 	// Pass messages to DB list if showing
@@ -322,26 +316,91 @@ func (m *ConnectModel) View() string {
 }
 
 func (m *ConnectModel) viewWelcome() string {
-	centerStyle := lipgloss.NewStyle().
-		Width(m.width).
-		Height(m.height).
-		Align(lipgloss.Center, lipgloss.Center)
-
 	logoStyle := lipgloss.NewStyle().Foreground(styles.Primary)
 	logo := logoStyle.Render(assets.Logo)
+	anim := m.renderTornadoAnimation()
 
 	helpStyle := lipgloss.NewStyle().
 		Foreground(styles.TextMuted).
 		MarginTop(2)
 	help := helpStyle.Render("Space: Connect | Ctrl+C: Quit")
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Center,
-		logo,
-		help,
-	)
+	fullLogo := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, logo)
+	fullHelp := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help)
+	content := lipgloss.JoinVertical(lipgloss.Left, fullLogo, anim, fullHelp)
 
-	return centerStyle.Render(content)
+	lines := strings.Split(content, "\n")
+	contentHeight := len(lines)
+	topPad := (m.height - contentHeight) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+
+	bg := lipgloss.NewStyle().Background(styles.BgDefault)
+	return bg.Render(strings.Repeat("\n", topPad) + content)
+}
+
+var tornadoAnimLines = []string{
+	"                          ██████                            ",
+	"          ██████████                          ████████      ",
+	"    ██████████                                    ████████  ",
+	"  ████████      ████                      ██████      ██████",
+	"████████    ████                              ████    ██████",
+	"██████    ████    ██████    ████████    ██      ██████████  ",
+	"  ██████  ████  ████      ████████████    ██  ██████████    ",
+	"    ████████████  ████                  ████████████    ██  ",
+	"        ████  ██████████████████████████████████    ██████  ",
+	"          ████                                  ████████    ",
+	"            ████████    ██████████████████████████████      ",
+	"                  ████████                            ██    ",
+	"              ████      ██████████████████████████████      ",
+	"                ████████        ██████████████              ",
+	"                    ████████████              ██████        ",
+	"                            ██████████████████████          ",
+	"                      ██████                                ",
+	"                        ████████████████████                ",
+	"                      ██      ████████████                  ",
+	"                        ██████                              ",
+	"                          ██████████████                    ",
+	"                      ██      ██████                        ",
+	"                      ██████                                ",
+	"                        ████████████                        ",
+	"                      ██                                    ",
+	"                        ██████                              ",
+	"                          ██                                ",
+}
+
+func (m *ConnectModel) renderTornadoAnimation() string {
+	if m.width == 0 {
+		return ""
+	}
+
+	var out []string
+	n := len(tornadoAnimLines)
+	for i, line := range tornadoAnimLines {
+		funnel := math.Pow(float64(i)/float64(maxInt(1, n-1)), 1.2)
+		sway := int(math.Sin(m.animT*2.0+float64(i)*0.35) * (2.5 * funnel))
+		pad := (m.width-lipgloss.Width(line))/2 + sway
+		if pad < 0 {
+			pad = 0
+		}
+		styled := lipgloss.NewStyle().Foreground(styles.TextMuted).Render(line)
+		if i < 2 {
+			styled = lipgloss.NewStyle().Foreground(styles.Primary).Render(line)
+		}
+		lineOut := strings.Repeat(" ", pad) + styled
+		lineOut = padToVisualWidth(lineOut, m.width)
+		out = append(out, lineOut)
+	}
+	return strings.Join(out, "\n")
+}
+
+func padToVisualWidth(s string, width int) string {
+	w := lipgloss.Width(s)
+	if w >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-w)
 }
 
 func (m *ConnectModel) viewForm() string {

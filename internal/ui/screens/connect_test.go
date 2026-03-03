@@ -31,9 +31,8 @@ func TestConnectModel_Init(t *testing.T) {
 	m := NewConnectModel()
 	cmd := m.Init()
 
-	// Init should return nil now
-	if cmd != nil {
-		t.Error("Init() should return nil")
+	if cmd == nil {
+		t.Error("Init() should return animation tick command")
 	}
 }
 

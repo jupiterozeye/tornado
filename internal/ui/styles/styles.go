@@ -12,6 +12,103 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type ThemePalette struct {
+	Name                                  string
+	Primary, PrimaryBg                    lipgloss.Color
+	Secondary, Accent                     lipgloss.Color
+	Success, Warning, Error, Info         lipgloss.Color
+	Text, TextMuted, TextBold, TextAccent lipgloss.Color
+	BgDefault, BgDark, BgLight            lipgloss.Color
+	Border, BorderFocus                   lipgloss.Color
+}
+
+var themeOrder = []string{
+	"sqlit", "sqlit-light", "nord", "gruvbox", "gruvbox-light", "tokyo-night", "solarized-dark", "solarized-light", "catppuccin-mocha", "catppuccin-latte", "rose-pine", "rose-pine-dawn", "dracula", "everforest", "kanagawa", "hackerman", "matte-black", "ristretto", "osaka-jade",
+}
+
+var palettes = map[string]ThemePalette{
+	"sqlit":            {"sqlit", lipgloss.Color("151"), lipgloss.Color("66"), lipgloss.Color("68"), lipgloss.Color("68"), lipgloss.Color("77"), lipgloss.Color("214"), lipgloss.Color("168"), lipgloss.Color("74"), lipgloss.Color("251"), lipgloss.Color("246"), lipgloss.Color("255"), lipgloss.Color("151"), lipgloss.Color("235"), lipgloss.Color("234"), lipgloss.Color("237"), lipgloss.Color("239"), lipgloss.Color("68")},
+	"sqlit-light":      {"sqlit-light", lipgloss.Color("28"), lipgloss.Color("24"), lipgloss.Color("24"), lipgloss.Color("24"), lipgloss.Color("28"), lipgloss.Color("208"), lipgloss.Color("160"), lipgloss.Color("24"), lipgloss.Color("238"), lipgloss.Color("245"), lipgloss.Color("16"), lipgloss.Color("24"), lipgloss.Color("254"), lipgloss.Color("255"), lipgloss.Color("252"), lipgloss.Color("249"), lipgloss.Color("24")},
+	"nord":             {"nord", lipgloss.Color("110"), lipgloss.Color("67"), lipgloss.Color("109"), lipgloss.Color("181"), lipgloss.Color("108"), lipgloss.Color("179"), lipgloss.Color("174"), lipgloss.Color("67"), lipgloss.Color("252"), lipgloss.Color("245"), lipgloss.Color("255"), lipgloss.Color("110"), lipgloss.Color("237"), lipgloss.Color("236"), lipgloss.Color("239"), lipgloss.Color("240"), lipgloss.Color("110")},
+	"gruvbox":          {"gruvbox", lipgloss.Color("108"), lipgloss.Color("130"), lipgloss.Color("172"), lipgloss.Color("108"), lipgloss.Color("142"), lipgloss.Color("214"), lipgloss.Color("167"), lipgloss.Color("109"), lipgloss.Color("223"), lipgloss.Color("246"), lipgloss.Color("230"), lipgloss.Color("108"), lipgloss.Color("235"), lipgloss.Color("234"), lipgloss.Color("237"), lipgloss.Color("239"), lipgloss.Color("108")},
+	"gruvbox-light":    {"gruvbox-light", lipgloss.Color("65"), lipgloss.Color("100"), lipgloss.Color("136"), lipgloss.Color("65"), lipgloss.Color("100"), lipgloss.Color("130"), lipgloss.Color("124"), lipgloss.Color("67"), lipgloss.Color("237"), lipgloss.Color("244"), lipgloss.Color("234"), lipgloss.Color("65"), lipgloss.Color("230"), lipgloss.Color("223"), lipgloss.Color("187"), lipgloss.Color("180"), lipgloss.Color("65")},
+	"tokyo-night":      {"tokyo-night", lipgloss.Color("111"), lipgloss.Color("68"), lipgloss.Color("68"), lipgloss.Color("111"), lipgloss.Color("114"), lipgloss.Color("179"), lipgloss.Color("167"), lipgloss.Color("110"), lipgloss.Color("252"), lipgloss.Color("245"), lipgloss.Color("255"), lipgloss.Color("111"), lipgloss.Color("235"), lipgloss.Color("234"), lipgloss.Color("237"), lipgloss.Color("239"), lipgloss.Color("111")},
+	"solarized-dark":   {"solarized-dark", lipgloss.Color("136"), lipgloss.Color("37"), lipgloss.Color("244"), lipgloss.Color("136"), lipgloss.Color("64"), lipgloss.Color("166"), lipgloss.Color("160"), lipgloss.Color("33"), lipgloss.Color("250"), lipgloss.Color("244"), lipgloss.Color("255"), lipgloss.Color("136"), lipgloss.Color("236"), lipgloss.Color("235"), lipgloss.Color("238"), lipgloss.Color("240"), lipgloss.Color("136")},
+	"solarized-light":  {"solarized-light", lipgloss.Color("64"), lipgloss.Color("37"), lipgloss.Color("37"), lipgloss.Color("64"), lipgloss.Color("64"), lipgloss.Color("166"), lipgloss.Color("160"), lipgloss.Color("33"), lipgloss.Color("238"), lipgloss.Color("244"), lipgloss.Color("234"), lipgloss.Color("64"), lipgloss.Color("230"), lipgloss.Color("254"), lipgloss.Color("187"), lipgloss.Color("244"), lipgloss.Color("64")},
+	"catppuccin-mocha": {"catppuccin-mocha", lipgloss.Color("111"), lipgloss.Color("68"), lipgloss.Color("104"), lipgloss.Color("111"), lipgloss.Color("114"), lipgloss.Color("179"), lipgloss.Color("167"), lipgloss.Color("68"), lipgloss.Color("252"), lipgloss.Color("245"), lipgloss.Color("255"), lipgloss.Color("111"), lipgloss.Color("236"), lipgloss.Color("235"), lipgloss.Color("239"), lipgloss.Color("240"), lipgloss.Color("111")},
+	"catppuccin-latte": {"catppuccin-latte", lipgloss.Color("68"), lipgloss.Color("24"), lipgloss.Color("110"), lipgloss.Color("68"), lipgloss.Color("64"), lipgloss.Color("172"), lipgloss.Color("167"), lipgloss.Color("24"), lipgloss.Color("238"), lipgloss.Color("245"), lipgloss.Color("16"), lipgloss.Color("68"), lipgloss.Color("254"), lipgloss.Color("255"), lipgloss.Color("252"), lipgloss.Color("249"), lipgloss.Color("68")},
+	"rose-pine":        {"rose-pine", lipgloss.Color("175"), lipgloss.Color("103"), lipgloss.Color("145"), lipgloss.Color("175"), lipgloss.Color("108"), lipgloss.Color("180"), lipgloss.Color("174"), lipgloss.Color("110"), lipgloss.Color("252"), lipgloss.Color("245"), lipgloss.Color("255"), lipgloss.Color("175"), lipgloss.Color("236"), lipgloss.Color("235"), lipgloss.Color("239"), lipgloss.Color("240"), lipgloss.Color("175")},
+	"rose-pine-dawn":   {"rose-pine-dawn", lipgloss.Color("103"), lipgloss.Color("67"), lipgloss.Color("145"), lipgloss.Color("103"), lipgloss.Color("101"), lipgloss.Color("180"), lipgloss.Color("167"), lipgloss.Color("67"), lipgloss.Color("238"), lipgloss.Color("245"), lipgloss.Color("16"), lipgloss.Color("103"), lipgloss.Color("254"), lipgloss.Color("255"), lipgloss.Color("252"), lipgloss.Color("249"), lipgloss.Color("103")},
+	"dracula":          {"dracula", lipgloss.Color("141"), lipgloss.Color("63"), lipgloss.Color("212"), lipgloss.Color("141"), lipgloss.Color("84"), lipgloss.Color("227"), lipgloss.Color("203"), lipgloss.Color("75"), lipgloss.Color("255"), lipgloss.Color("246"), lipgloss.Color("255"), lipgloss.Color("141"), lipgloss.Color("236"), lipgloss.Color("235"), lipgloss.Color("238"), lipgloss.Color("240"), lipgloss.Color("141")},
+	"everforest":       {"everforest", lipgloss.Color("150"), lipgloss.Color("71"), lipgloss.Color("108"), lipgloss.Color("109"), lipgloss.Color("150"), lipgloss.Color("179"), lipgloss.Color("174"), lipgloss.Color("108"), lipgloss.Color("223"), lipgloss.Color("245"), lipgloss.Color("255"), lipgloss.Color("150"), lipgloss.Color("235"), lipgloss.Color("236"), lipgloss.Color("239"), lipgloss.Color("240"), lipgloss.Color("150")},
+	"kanagawa":         {"kanagawa", lipgloss.Color("110"), lipgloss.Color("67"), lipgloss.Color("110"), lipgloss.Color("175"), lipgloss.Color("113"), lipgloss.Color("215"), lipgloss.Color("174"), lipgloss.Color("110"), lipgloss.Color("230"), lipgloss.Color("245"), lipgloss.Color("255"), lipgloss.Color("110"), lipgloss.Color("235"), lipgloss.Color("234"), lipgloss.Color("237"), lipgloss.Color("239"), lipgloss.Color("110")},
+	"hackerman":        {"hackerman", lipgloss.Color("46"), lipgloss.Color("22"), lipgloss.Color("34"), lipgloss.Color("46"), lipgloss.Color("46"), lipgloss.Color("226"), lipgloss.Color("196"), lipgloss.Color("46"), lipgloss.Color("46"), lipgloss.Color("34"), lipgloss.Color("46"), lipgloss.Color("46"), lipgloss.Color("233"), lipgloss.Color("232"), lipgloss.Color("234"), lipgloss.Color("28"), lipgloss.Color("46")},
+	"matte-black":      {"matte-black", lipgloss.Color("255"), lipgloss.Color("245"), lipgloss.Color("245"), lipgloss.Color("255"), lipgloss.Color("46"), lipgloss.Color("214"), lipgloss.Color("203"), lipgloss.Color("75"), lipgloss.Color("252"), lipgloss.Color("245"), lipgloss.Color("255"), lipgloss.Color("255"), lipgloss.Color("233"), lipgloss.Color("232"), lipgloss.Color("234"), lipgloss.Color("238"), lipgloss.Color("255")},
+	"ristretto":        {"ristretto", lipgloss.Color("224"), lipgloss.Color("138"), lipgloss.Color("181"), lipgloss.Color("224"), lipgloss.Color("114"), lipgloss.Color("180"), lipgloss.Color("174"), lipgloss.Color("109"), lipgloss.Color("223"), lipgloss.Color("246"), lipgloss.Color("255"), lipgloss.Color("224"), lipgloss.Color("235"), lipgloss.Color("234"), lipgloss.Color("237"), lipgloss.Color("239"), lipgloss.Color("224")},
+	"osaka-jade":       {"osaka-jade", lipgloss.Color("115"), lipgloss.Color("65"), lipgloss.Color("72"), lipgloss.Color("115"), lipgloss.Color("115"), lipgloss.Color("179"), lipgloss.Color("174"), lipgloss.Color("72"), lipgloss.Color("152"), lipgloss.Color("245"), lipgloss.Color("255"), lipgloss.Color("115"), lipgloss.Color("233"), lipgloss.Color("234"), lipgloss.Color("236"), lipgloss.Color("238"), lipgloss.Color("115")},
+}
+
+var currentThemeIndex = 0
+
+func init() {
+	if p, ok := palettes[themeOrder[currentThemeIndex]]; ok {
+		applyPalette(p)
+	}
+}
+
+func applyPalette(p ThemePalette) {
+	Primary = p.Primary
+	PrimaryBg = p.PrimaryBg
+	Secondary = p.Secondary
+	Accent = p.Accent
+	Success = p.Success
+	Warning = p.Warning
+	Error = p.Error
+	Info = p.Info
+	Text = p.Text
+	TextMuted = p.TextMuted
+	TextBold = p.TextBold
+	TextAccent = p.TextAccent
+	BgDefault = p.BgDefault
+	BgDark = p.BgDark
+	BgLight = p.BgLight
+	Border = p.Border
+	BorderFocus = p.BorderFocus
+}
+
+func CycleTheme() string {
+	currentThemeIndex = (currentThemeIndex + 1) % len(themeOrder)
+	name := themeOrder[currentThemeIndex]
+	if p, ok := palettes[name]; ok {
+		applyPalette(p)
+	}
+	return name
+}
+
+func AvailableThemes() []string {
+	out := make([]string, len(themeOrder))
+	copy(out, themeOrder)
+	return out
+}
+
+func SetTheme(name string) bool {
+	for i, n := range themeOrder {
+		if n == name {
+			currentThemeIndex = i
+			if p, ok := palettes[name]; ok {
+				applyPalette(p)
+				return true
+			}
+			return false
+		}
+	}
+	return false
+}
+
+func CurrentTheme() string {
+	return themeOrder[currentThemeIndex]
+}
+
 var (
 	// Primary colors - main application accent
 	Primary   = lipgloss.Color("99") // Purple

@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -56,6 +57,12 @@ const (
 	QueryModeInsert
 )
 
+type browserThemeItem struct{ name string }
+
+func (i browserThemeItem) Title() string       { return i.name }
+func (i browserThemeItem) Description() string { return "" }
+func (i browserThemeItem) FilterValue() string { return i.name }
+
 // BrowserModel is the model for the database browser screen.
 type BrowserModel struct {
 	// Database connection
@@ -77,6 +84,8 @@ type BrowserModel struct {
 	styles        *styles.Styles
 	showExplorer  bool
 	leaderActive  bool
+	themeMenu     bool
+	themeList     list.Model
 	statusMsg     string
 	maximizedPane Pane
 
@@ -110,6 +119,15 @@ func NewBrowserModel(database db.Database) *BrowserModel {
 		Selected: lipgloss.NewStyle().Foreground(styles.Primary).Bold(true),
 	})
 
+	themeItems := make([]list.Item, 0, len(styles.AvailableThemes()))
+	for _, t := range styles.AvailableThemes() {
+		themeItems = append(themeItems, browserThemeItem{name: t})
+	}
+	themeList := list.New(themeItems, list.NewDefaultDelegate(), 36, 12)
+	themeList.Title = "Themes"
+	themeList.SetShowStatusBar(false)
+	themeList.SetFilteringEnabled(false)
+
 	return &BrowserModel{
 		db:            database,
 		layoutManager: l,
@@ -119,6 +137,7 @@ func NewBrowserModel(database db.Database) *BrowserModel {
 		queryMode:     QueryModeNormal,
 		styles:        s,
 		showExplorer:  true,
+		themeList:     themeList,
 		maximizedPane: PaneNone,
 	}
 }
@@ -142,6 +161,10 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateComponentSizes()
 
 	case tea.KeyMsg:
+		if m.themeMenu {
+			return m.handleThemeMenuKey(msg)
+		}
+
 		if m.leaderActive {
 			return m.handleLeaderKey(msg)
 		}
@@ -157,6 +180,7 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case " ":
 			m.leaderActive = true
+			m.themeMenu = false
 			m.statusMsg = "Command menu: e toggle explorer, f maximize pane, c connect, x disconnect, t theme, h help, / search, q quit"
 			return m, nil
 		case "e":
@@ -266,6 +290,9 @@ func (m *BrowserModel) View() string {
 
 	if m.leaderActive {
 		main = m.overlayLeaderMenu(main)
+	}
+	if m.themeMenu {
+		main = m.overlayThemeMenu(main)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, main, m.renderContextFooter())
@@ -459,7 +486,9 @@ func (m *BrowserModel) handleLeaderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, func() tea.Msg { return RequestConnectMsg{} }
 	case "t":
-		m.statusMsg = "Theme toggle: not implemented yet"
+		m.themeMenu = true
+		m.leaderActive = false
+		m.statusMsg = "Select theme and press Enter"
 		return m, nil
 	case "h", "?":
 		m.statusMsg = "Help: e/q/r focus, space command menu, enter run query in NORMAL"
@@ -473,6 +502,33 @@ func (m *BrowserModel) handleLeaderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.statusMsg = "Unknown command"
 		return m, nil
 	}
+}
+
+func (m *BrowserModel) handleThemeMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.themeMenu = false
+		m.statusMsg = ""
+		return m, nil
+	case "enter":
+		if it, ok := m.themeList.SelectedItem().(browserThemeItem); ok {
+			if styles.SetTheme(it.name) {
+				m.styles = styles.Default()
+				m.results.SetStyles(table.Styles{
+					Header:   styles.TableHeader(),
+					Cell:     lipgloss.NewStyle().Padding(0, 1),
+					Selected: lipgloss.NewStyle().Foreground(styles.Primary).Bold(true),
+				})
+				m.statusMsg = "Theme: " + it.name
+			}
+		}
+		m.themeMenu = false
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.themeList, cmd = m.themeList.Update(msg)
+	return m, cmd
 }
 
 func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
@@ -514,39 +570,99 @@ func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 func (m *BrowserModel) overlayLeaderMenu(base string) string {
+	menuLines := buildLeaderMenuLines()
+	menuW := 0
+	for _, l := range menuLines {
+		if w := lipgloss.Width(l); w > menuW {
+			menuW = w
+		}
+	}
+	x := (m.width - menuW) / 2
+	if x < 0 {
+		x = 0
+	}
+	y := 1
+	out := base
+	for i, line := range menuLines {
+		out += fmt.Sprintf("\x1b[%d;%dH%s", y+i+1, x+1, line)
+	}
+	return out
+}
+
+func (m *BrowserModel) overlayThemeMenu(base string) string {
 	menu := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.BorderFocus).
-		Padding(1, 2).
+		Padding(0, 1).
 		Background(styles.BgDark).
-		Render(strings.Join([]string{
-			"<space> Commands",
-			"",
-			"e  Toggle Explorer",
-			"f  Toggle Maximize",
-			"c  Connect",
-			"x  Disconnect",
-			"t  Change Theme",
-			"h  Help",
-			"/  Telescope Search",
-			"q  Quit",
-			"",
-			"Close: <esc>",
-		}, "\n"))
+		Render(m.themeList.View())
 
-	menuW := lipgloss.Width(menu)
-	x := (m.width-menuW)/2 + 1
-	if x < 1 {
-		x = 1
+	x := (m.width - lipgloss.Width(menu)) / 2
+	if x < 0 {
+		x = 0
 	}
-	menuY := 2
+	y := 1
 
 	lines := strings.Split(menu, "\n")
 	out := base
 	for i, line := range lines {
-		out += fmt.Sprintf("\x1b[%d;%dH%s", menuY+i, x, line)
+		out += fmt.Sprintf("\x1b[%d;%dH%s", y+i+1, x+1, line)
 	}
 	return out
+}
+
+func buildLeaderMenuLines() []string {
+	items := []string{
+		"e  Toggle Explorer",
+		"f  Toggle Maximize",
+		"c  Connect",
+		"x  Disconnect",
+		"t  Change Theme",
+		"h  Help",
+		"/  Telescope Search",
+		"q  Quit",
+	}
+
+	innerW := lipgloss.Width("<space> Commands    Close: <esc>")
+	for _, it := range items {
+		if w := lipgloss.Width(it); w > innerW {
+			innerW = w
+		}
+	}
+
+	title := padToWidth("<space> Commands    Close: <esc>", innerW)
+	lines := []string{
+		"╭" + strings.Repeat("─", innerW+2) + "╮",
+		"│ " + title + " │",
+		"├" + strings.Repeat("─", innerW+2) + "┤",
+	}
+	for _, it := range items {
+		lines = append(lines, "│ "+padToWidth(it, innerW)+" │")
+	}
+	lines = append(lines, "╰"+strings.Repeat("─", innerW+2)+"╯")
+
+	return lines
+}
+
+func overlayAt(base, overlay string, x int) string {
+	baseRunes := []rune(base)
+	overRunes := []rune(overlay)
+	if x > len(baseRunes) {
+		x = len(baseRunes)
+	}
+	if len(baseRunes) < x+len(overRunes) {
+		pad := make([]rune, x+len(overRunes)-len(baseRunes))
+		for i := range pad {
+			pad[i] = ' '
+		}
+		baseRunes = append(baseRunes, pad...)
+	}
+	for i, r := range overRunes {
+		if r != ' ' {
+			baseRunes[x+i] = r
+		}
+	}
+	return string(baseRunes)
 }
 
 type RequestConnectMsg struct{}
