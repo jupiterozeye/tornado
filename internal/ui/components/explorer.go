@@ -339,7 +339,7 @@ func (m *ExplorerModel) selectCurrent() tea.Cmd {
 	node := m.flatList[m.cursor]
 	if node.Type == NodeTable {
 		return func() tea.Msg {
-			return TableSelectedMsg{TableName: node.Name}
+			return TableSelectedMsg{Name: node.Name}
 		}
 	}
 
@@ -554,9 +554,4 @@ type ColumnsLoadedMsg struct {
 	TableName string
 	Columns   []models.Column
 	Err       error
-}
-
-// ExplorerTableSelectedMsg is sent when user selects a table with 's'
-type ExplorerTableSelectedMsg struct {
-	TableName string
 }
