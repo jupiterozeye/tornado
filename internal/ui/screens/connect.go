@@ -101,10 +101,12 @@ func NewConnectModel() *ConnectModel {
 	}
 
 	dbList := list.New(dbItems, list.NewDefaultDelegate(), 40, 6)
-	dbList.Title = "Select Database Type"
+	dbList.Title = "Database Type"
 	dbList.SetShowStatusBar(false)
+	dbList.SetShowHelp(false)
+	dbList.SetShowPagination(false)
 	dbList.SetFilteringEnabled(false)
-	dbList.Styles.Title = s.Header
+	dbList.SetShowTitle(false)
 
 	// Initialize form fields
 	path := textinput.New()
@@ -303,15 +305,16 @@ func (m *ConnectModel) updateFocusedInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // View renders the connection screen.
 func (m *ConnectModel) View() string {
+	base := m.viewWelcome()
 	switch m.state {
 	case StateWelcome:
-		return m.viewWelcome()
+		return base
 	case StateForm:
-		return m.viewForm()
+		return m.overlayCentered(base, m.viewForm())
 	case StateConnecting:
-		return m.viewConnecting()
+		return m.overlayCentered(base, m.viewConnecting())
 	default:
-		return m.viewWelcome()
+		return base
 	}
 }
 
@@ -329,14 +332,8 @@ func (m *ConnectModel) viewWelcome() string {
 	fullHelp := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help)
 	content := lipgloss.JoinVertical(lipgloss.Left, fullLogo, anim, fullHelp)
 
-	lines := strings.Split(content, "\n")
-	contentHeight := len(lines)
-	topPad := (m.height - contentHeight) / 2
-	if topPad < 0 {
-		topPad = 0
-	}
-
-	return strings.Repeat("\n", topPad) + content
+	// Use lipgloss.Place to fill the full terminal so ANSI overlays work
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 var tornadoAnimLines = []string{
@@ -414,100 +411,48 @@ func maxConnectInt(a, b int) int {
 }
 
 func (m *ConnectModel) viewForm() string {
-	centerStyle := lipgloss.NewStyle().
-		Width(m.width).
-		Height(m.height).
-		Align(lipgloss.Center, lipgloss.Center)
-
 	isSQLite := m.isSQLite()
-	height := 14
-	if !isSQLite {
-		height = 22
-	}
-
-	modalStyle := lipgloss.NewStyle().
-		Width(50).
-		Height(height).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.BorderFocus).
-		Padding(1, 2)
-
-	title := m.styles.Subheader.Render("Connect to Database")
-
+	bodyWidth := 50
+	fieldWidth := bodyWidth - 2
 	var fields []string
 
-	// DB Type dropdown
 	if m.showDbList && m.focusIndex == 0 {
-		// Show full list
-		fields = append(fields, m.dbTypeList.View())
+		m.dbTypeList.SetWidth(fieldWidth - 4)
+		m.dbTypeList.SetHeight(4)
+		fields = append(fields, m.renderFieldContainer("Database Type", m.dbTypeList.View(), true, fieldWidth))
 	} else {
-		// Show selected value
-		dbLabel := m.styles.Muted.Render("Database Type:")
-		var dbValue string
+		dbValue := m.selectedDb
 		if m.focusIndex == 0 {
-			dbValue = m.styles.InputFocus.Render("▸ " + m.selectedDb)
-		} else {
-			dbValue = m.styles.Input.Render("  " + m.selectedDb)
+			dbValue = "▾ " + dbValue
 		}
-		fields = append(fields, dbLabel, dbValue)
+		fields = append(fields, m.renderFieldContainer("Database Type", dbValue, m.focusIndex == 0, fieldWidth))
 	}
 
-	fields = append(fields, "")
-
 	if isSQLite {
-		// SQLite: File Path
-		pathLabel := m.styles.Muted.Render("Database File:")
-		pathValue := m.pathInput.Value()
-		if pathValue == "" {
-			pathValue = m.pathInput.View() // Show placeholder
-		}
-		pathField := m.renderTextField(1, pathValue)
-		fields = append(fields, pathLabel, pathField)
-
-		// Show current path for debugging
-		if pathValue != "" && pathValue != m.pathInput.Placeholder {
-			fields = append(fields, "", m.styles.Muted.Render("Path: "+pathValue))
-		}
+		pathValue := m.displayInput(&m.pathInput, m.focusIndex == 1)
+		fields = append(fields, m.renderFieldContainer("Database File", pathValue, m.focusIndex == 1, fieldWidth))
 	} else {
-		// PostgreSQL fields
-		hostLabel := m.styles.Muted.Render("Host:")
-		hostField := m.renderTextField(2, m.hostInput.View())
-		fields = append(fields, hostLabel, hostField)
-
-		portLabel := m.styles.Muted.Render("Port:")
-		portField := m.renderTextField(3, m.portInput.View())
-		fields = append(fields, "", portLabel, portField)
-
-		userLabel := m.styles.Muted.Render("Username:")
-		userField := m.renderTextField(4, m.userInput.View())
-		fields = append(fields, "", userLabel, userField)
-
-		passLabel := m.styles.Muted.Render("Password:")
-		passField := m.renderTextField(5, m.passwordInput.View())
-		fields = append(fields, "", passLabel, passField)
-
-		dbLabel := m.styles.Muted.Render("Database:")
-		dbField := m.renderTextField(6, m.databaseInput.View())
-		fields = append(fields, "", dbLabel, dbField)
+		fields = append(fields,
+			m.renderFieldContainer("Host", m.displayInput(&m.hostInput, m.focusIndex == 2), m.focusIndex == 2, fieldWidth),
+			m.renderFieldContainer("Port", m.displayInput(&m.portInput, m.focusIndex == 3), m.focusIndex == 3, fieldWidth),
+			m.renderFieldContainer("Username", m.displayInput(&m.userInput, m.focusIndex == 4), m.focusIndex == 4, fieldWidth),
+			m.renderFieldContainer("Password", m.displayInput(&m.passwordInput, m.focusIndex == 5), m.focusIndex == 5, fieldWidth),
+			m.renderFieldContainer("Database", m.displayInput(&m.databaseInput, m.focusIndex == 6), m.focusIndex == 6, fieldWidth),
+		)
 	}
 
 	if m.errorMsg != "" {
-		fields = append(fields, "", m.styles.Error.Render(m.errorMsg))
+		fields = append(fields, m.styles.Error.Render(truncateToWidth(m.errorMsg, fieldWidth-2)))
 	}
 
-	// Dynamic help text based on current field
-	helpText := "Tab: Navigate | Esc: Cancel"
+	helpText := "tab Next · shift+tab Prev · esc Cancel"
 	if m.focusIndex == 0 && m.showDbList {
-		helpText = "↑↓: Select | Enter: Confirm | Esc: Cancel"
+		helpText = "up/down Select · enter Confirm · esc Cancel"
 	} else if m.focusIndex == m.getMaxFieldIndex() {
-		helpText = "Tab: Navigate | Enter: Connect | Esc: Cancel"
+		helpText = "enter Connect · tab Previous fields · esc Cancel"
 	}
-	fields = append(fields, "", m.styles.Muted.Render(helpText))
 
-	formContent := lipgloss.JoinVertical(lipgloss.Left, fields...)
-	modalContent := lipgloss.JoinVertical(lipgloss.Left, title, "", formContent)
-
-	return centerStyle.Render(modalStyle.Render(modalContent))
+	return renderDialogBox("Connect to Database", fields, helpText, bodyWidth+2)
 }
 
 func (m *ConnectModel) renderTextField(index int, value string) string {
@@ -518,46 +463,74 @@ func (m *ConnectModel) renderTextField(index int, value string) string {
 }
 
 func (m *ConnectModel) viewConnecting() string {
-	// Fallback dimensions if not set
-	width := m.width
-	height := m.height
-	if width == 0 {
-		width = 80
-	}
-	if height == 0 {
-		height = 24
-	}
-
-	centerStyle := lipgloss.NewStyle().
-		Width(width).
-		Height(height).
-		Align(lipgloss.Center, lipgloss.Center)
-
+	body := []string{}
 	if m.errorMsg != "" {
-		// Show error if connection failed
-		content := lipgloss.JoinVertical(
-			lipgloss.Center,
-			m.styles.Error.Render("Connection Failed:"),
-			m.styles.Body.Render(m.errorMsg),
+		body = append(body,
+			m.styles.Error.Render("Connection Failed"),
+			truncateToWidth(m.errorMsg, 50),
 			"",
-			m.styles.Muted.Render("Press any key to return..."),
+			m.styles.Muted.Render("Press any key to return"),
 		)
-		return centerStyle.Render(content)
+		return renderDialogBox("Connecting", body, "any key Back", 54)
 	}
 
-	// Use simple spinner frames
 	frames := []string{"⎛", "⎜", "⎝", "⎞", "⎟", "⎠"}
 	frame := frames[m.spinnerFrame%len(frames)]
-
-	spinnerText := lipgloss.NewStyle().Foreground(styles.Primary).Render(frame) + "  Connecting to database..."
-	content := lipgloss.JoinVertical(
-		lipgloss.Center,
-		m.styles.Body.Render(spinnerText),
+	body = append(body,
+		lipgloss.NewStyle().Foreground(styles.Primary).Render(frame)+"  Connecting to database...",
 		"",
-		m.styles.Muted.Render("Please wait..."),
+		m.styles.Muted.Render("Please wait"),
 	)
+	return renderDialogBox("Connecting", body, "esc Disabled while connecting", 54)
+}
 
-	return centerStyle.Render(content)
+func (m *ConnectModel) renderFieldContainer(label, content string, focused bool, width int) string {
+	if width < 8 {
+		width = 8
+	}
+	innerWidth := width - 2
+	borderColor := styles.Border
+	if focused {
+		borderColor = styles.BorderFocus
+	}
+	borderStyle := lipgloss.NewStyle().
+		Foreground(borderColor).
+		Background(styles.BgDark)
+	bodyStyle := lipgloss.NewStyle().Background(styles.BgDark)
+
+	top := makeTopBorder(label, innerWidth)
+	contentLines := strings.Split(content, "\n")
+	if len(contentLines) == 0 {
+		contentLines = []string{""}
+	}
+	bottom := strings.Repeat("─", innerWidth)
+
+	out := []string{borderStyle.Render("┌" + top + "┐")}
+	for _, contentLine := range contentLines {
+		line := truncateToWidth(contentLine, innerWidth)
+		line = padToWidth(line, innerWidth)
+		out = append(out, borderStyle.Render("│")+bodyStyle.Render(line)+borderStyle.Render("│"))
+	}
+	out = append(out, borderStyle.Render("└"+bottom+"┘"))
+
+	return strings.Join(out, "\n")
+}
+
+func (m *ConnectModel) displayInput(input *textinput.Model, focused bool) string {
+	if focused {
+		return input.View()
+	}
+	if input.Value() != "" {
+		return input.View()
+	}
+	return input.Placeholder
+}
+
+func (m *ConnectModel) overlayCentered(base, box string) string {
+	if m.width == 0 || m.height == 0 {
+		return box
+	}
+	return compositeOverlay(base, box, m.width, m.height)
 }
 
 // Helper methods

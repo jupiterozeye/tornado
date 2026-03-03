@@ -147,7 +147,7 @@ func (m *ExplorerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the explorer
 func (m *ExplorerModel) View() string {
 	if len(m.flatList) == 0 {
-		return "Loading..."
+		return lipgloss.NewStyle().Background(styles.BgDefault).Render("Loading...")
 	}
 
 	var lines []string
@@ -232,21 +232,34 @@ func (m *ExplorerModel) renderNode(node *TreeNode, selected bool) string {
 		maxWidth = 1
 	}
 	line = truncateLine(line, maxWidth)
+	line = padExplorerLine(line, maxWidth)
 
 	// Apply selection styling
 	if selected {
-		return lipgloss.NewStyle().Bold(true).Foreground(styles.TextBold).Render(line)
+		return lipgloss.NewStyle().
+			Bold(true).
+			Foreground(styles.TextBold).
+			Background(styles.BgDefault).
+			Render(line)
 	}
 
 	// Apply type-specific styling
 	switch node.Type {
 	case NodeCategory:
-		return lipgloss.NewStyle().Bold(true).Foreground(styles.Secondary).Render(line)
+		return lipgloss.NewStyle().Bold(true).Foreground(styles.Secondary).Background(styles.BgDefault).Render(line)
 	case NodeTable:
-		return lipgloss.NewStyle().Foreground(styles.Primary).Render(line)
+		return lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgDefault).Render(line)
 	default:
-		return lipgloss.NewStyle().Foreground(styles.Text).Render(line)
+		return lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDefault).Render(line)
 	}
+}
+
+func padExplorerLine(s string, width int) string {
+	w := lipgloss.Width(s)
+	if w >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-w)
 }
 
 func truncateLine(s string, width int) string {

@@ -248,6 +248,27 @@ func Button(focused bool) lipgloss.Style {
 		Bold(focused)
 }
 
+// DialogBox creates a consistent popup style.
+func DialogBox() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(BorderFocus).
+		Background(BgDark)
+}
+
+// FieldContainer creates a focused/unfocused input container style.
+func FieldContainer(focused bool) lipgloss.Style {
+	borderColor := Border
+	if focused {
+		borderColor = BorderFocus
+	}
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(borderColor).
+		Background(BgDark)
+}
+
 // Table creates styles for table components.
 func TableHeader() lipgloss.Style {
 	return lipgloss.NewStyle().
