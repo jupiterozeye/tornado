@@ -223,11 +223,6 @@ type ScreenChangeMsg struct {
 	Screen Screen
 }
 
-// ConnectSuccessMsg is sent when a database connection is established.
-type ConnectSuccessMsg struct {
-	DB db.Database
-}
-
 // ErrorMsg represents a global error to display to the user.
 type ErrorMsg struct {
 	Err error
