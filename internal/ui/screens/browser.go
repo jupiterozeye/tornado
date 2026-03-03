@@ -288,14 +288,18 @@ func (m *BrowserModel) View() string {
 		}
 	}
 
+	content := lipgloss.JoinVertical(lipgloss.Left, main, m.renderContextFooter())
+	framed := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, content)
+	out := lipgloss.NewStyle().Background(styles.BgDefault).Render(framed)
+
 	if m.leaderActive {
-		main = m.overlayLeaderMenu(main)
+		out = m.overlayLeaderMenu(out)
 	}
 	if m.themeMenu {
-		main = m.overlayThemeMenu(main)
+		out = m.overlayThemeMenu(out)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, main, m.renderContextFooter())
+	return out
 }
 
 func (m *BrowserModel) decoratePane(title, key, content string, paneWidth, paneHeight int) string {
@@ -570,23 +574,13 @@ func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 func (m *BrowserModel) overlayLeaderMenu(base string) string {
-	menuLines := buildLeaderMenuLines()
-	menuW := 0
-	for _, l := range menuLines {
-		if w := lipgloss.Width(l); w > menuW {
-			menuW = w
-		}
-	}
-	x := (m.width - menuW) / 2
-	if x < 0 {
-		x = 0
-	}
-	y := 1
-	out := base
-	for i, line := range menuLines {
-		out += fmt.Sprintf("\x1b[%d;%dH%s", y+i+1, x+1, line)
-	}
-	return out
+	menu := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.BorderFocus).
+		Padding(0, 1).
+		Background(styles.BgDark).
+		Render(strings.Join(buildLeaderMenuLines(), "\n"))
+	return m.overlayBox(base, menu)
 }
 
 func (m *BrowserModel) overlayThemeMenu(base string) string {
@@ -596,23 +590,37 @@ func (m *BrowserModel) overlayThemeMenu(base string) string {
 		Padding(0, 1).
 		Background(styles.BgDark).
 		Render(m.themeList.View())
+	return m.overlayBox(base, menu)
+}
 
-	x := (m.width - lipgloss.Width(menu)) / 2
+func (m *BrowserModel) overlayBox(base, box string) string {
+	boxLines := strings.Split(box, "\n")
+	boxW := 0
+	for _, line := range boxLines {
+		if w := lipgloss.Width(line); w > boxW {
+			boxW = w
+		}
+	}
+
+	x := (m.width - boxW) / 2
 	if x < 0 {
 		x = 0
 	}
 	y := 1
 
-	lines := strings.Split(menu, "\n")
 	out := base
-	for i, line := range lines {
+	for i, line := range boxLines {
 		out += fmt.Sprintf("\x1b[%d;%dH%s", y+i+1, x+1, line)
 	}
+	// Restore cursor to a safe location at bottom-left.
+	out += fmt.Sprintf("\x1b[%d;%dH", m.height, 1)
 	return out
 }
 
 func buildLeaderMenuLines() []string {
-	items := []string{
+	return []string{
+		"<space> Commands    Close: <esc>",
+		"",
 		"e  Toggle Explorer",
 		"f  Toggle Maximize",
 		"c  Connect",
@@ -622,26 +630,6 @@ func buildLeaderMenuLines() []string {
 		"/  Telescope Search",
 		"q  Quit",
 	}
-
-	innerW := lipgloss.Width("<space> Commands    Close: <esc>")
-	for _, it := range items {
-		if w := lipgloss.Width(it); w > innerW {
-			innerW = w
-		}
-	}
-
-	title := padToWidth("<space> Commands    Close: <esc>", innerW)
-	lines := []string{
-		"╭" + strings.Repeat("─", innerW+2) + "╮",
-		"│ " + title + " │",
-		"├" + strings.Repeat("─", innerW+2) + "┤",
-	}
-	for _, it := range items {
-		lines = append(lines, "│ "+padToWidth(it, innerW)+" │")
-	}
-	lines = append(lines, "╰"+strings.Repeat("─", innerW+2)+"╯")
-
-	return lines
 }
 
 func overlayAt(base, overlay string, x int) string {

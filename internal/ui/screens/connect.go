@@ -336,8 +336,7 @@ func (m *ConnectModel) viewWelcome() string {
 		topPad = 0
 	}
 
-	bg := lipgloss.NewStyle().Background(styles.BgDefault)
-	return bg.Render(strings.Repeat("\n", topPad) + content)
+	return strings.Repeat("\n", topPad) + content
 }
 
 var tornadoAnimLines = []string{
@@ -378,8 +377,12 @@ func (m *ConnectModel) renderTornadoAnimation() string {
 	var out []string
 	n := len(tornadoAnimLines)
 	for i, line := range tornadoAnimLines {
-		funnel := math.Pow(float64(i)/float64(maxInt(1, n-1)), 1.2)
-		sway := int(math.Sin(m.animT*2.0+float64(i)*0.35) * (2.5 * funnel))
+		funnel := math.Pow(float64(i)/float64(maxConnectInt(1, n-1)), 1.2)
+		// Stronger top spin, softer bottom sway.
+		topWeight := 1.0 - funnel
+		amp := 5.0*topWeight + 2.0*funnel
+		phase := m.animT*3.1 + float64(i)*0.55
+		sway := int(math.Sin(phase) * amp)
 		pad := (m.width-lipgloss.Width(line))/2 + sway
 		if pad < 0 {
 			pad = 0
@@ -401,6 +404,13 @@ func padToVisualWidth(s string, width int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", width-w)
+}
+
+func maxConnectInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m *ConnectModel) viewForm() string {
