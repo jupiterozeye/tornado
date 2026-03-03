@@ -1,12 +1,12 @@
 // Package app contains the root application model and screen navigation logic.
 // References:
-//   - https://github.com/charmbracelet/bubbletea#tutorial
+//   - https://charm.land/bubbletea/v2#tutorial
 //   - https://guide.elm-lang.org/architecture/
 package app
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/ui/screens"
@@ -82,7 +82,7 @@ func (a *App) Init() tea.Cmd {
 //   - Messages from child screens
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c":
 			return a, tea.Quit
@@ -206,21 +206,20 @@ func (a *App) delegateToActiveScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the current state of the application.
 // It delegates rendering to the active screen.
-func (a *App) View() string {
-	// Get active screens content
-	content := a.getActiveScreen().View()
+func (a *App) View() tea.View {
+	// Get active screen's view
+	v := a.getActiveScreen().View()
 
 	if a.err != nil {
 		// Show error overlay
-		return lipgloss.JoinVertical(
+		v.Content = lipgloss.JoinVertical(
 			lipgloss.Left,
-			a.getActiveScreen().View(),
+			v.Content,
 			a.styles.Error.Render("Error: "+a.err.Error()),
 		)
-
 	}
 
-	return content
+	return v
 }
 
 // ScreenChangeMsg is a message for transitioning between screens.

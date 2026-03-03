@@ -17,14 +17,14 @@
 //   - tea.WithMouseCellMotion() enables mouse support for clicking
 //
 // References:
-//   - https://github.com/charmbracelet/bubbletea#quick-start
+//   - https://charm.land/bubbletea/v2#quick-start
 package main
 
 import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jupiterozeye/tornado/internal/app"
 )
@@ -56,11 +56,8 @@ func main() {
 	// - WithAltScreen: Uses alternate screen buffer (your terminal returns to
 	//   its previous state when the app exits)
 	// - WithMouseCellMotion: Enables mouse click and drag support
-	p := tea.NewProgram(
-		application,
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	)
+	// AltScreen and mouse mode are now set in View() return values
+	p := tea.NewProgram(application)
 
 	// Run the program - this blocks until the user quits
 	// The returned model is the final state (usually not needed)

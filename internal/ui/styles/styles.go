@@ -4,22 +4,24 @@
 //   - Change colors/sizing in one place
 //
 // References:
-//   - https://github.com/charmbracelet/lipgloss
-//   - https://github.com/charmbracelet/lipgloss#adaptive-colors
+//   - https://charm.land/lipgloss/v2
+//   - https://charm.land/lipgloss/v2#adaptive-colors
 package styles
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"image/color"
+
+	"charm.land/lipgloss/v2"
 )
 
 type ThemePalette struct {
 	Name                                  string
-	Primary, PrimaryBg                    lipgloss.Color
-	Secondary, Accent                     lipgloss.Color
-	Success, Warning, Error, Info         lipgloss.Color
-	Text, TextMuted, TextBold, TextAccent lipgloss.Color
-	BgDefault, BgDark, BgLight            lipgloss.Color
-	Border, BorderFocus                   lipgloss.Color
+	Primary, PrimaryBg                    color.Color
+	Secondary, Accent                     color.Color
+	Success, Warning, Error, Info         color.Color
+	Text, TextMuted, TextBold, TextAccent color.Color
+	BgDefault, BgDark, BgLight            color.Color
+	Border, BorderFocus                   color.Color
 }
 
 var themeOrder = []string{

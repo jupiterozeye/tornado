@@ -26,13 +26,13 @@
 // References:
 //   - https://go.dev/tour/concurrency/1 (Goroutines)
 //   - https://go.dev/tour/concurrency/2 (Channels)
-//   - https://github.com/charmbracelet/bubbletea#commands
+//   - https://charm.land/bubbletea/v2#commands
 package telemetry
 
 import (
 	"time"
 
-	"github.com/charmbracelet/bubbletea"
+	"charm.land/bubbletea/v2"
 
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"

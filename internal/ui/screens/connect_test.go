@@ -3,7 +3,7 @@ package screens
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestNewConnectModel(t *testing.T) {
@@ -58,7 +58,7 @@ func TestConnectModel_Update_WelcomeState(t *testing.T) {
 	m := NewConnectModel()
 
 	// Test Space key to open form
-	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	newM, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 	cm := newM.(*ConnectModel)
 
 	if cm.state != StateForm {
@@ -70,7 +70,7 @@ func TestConnectModel_Update_WelcomeState(t *testing.T) {
 
 	// Test Ctrl+C - this is handled at the app level in app.go
 	// The connect screen doesn't handle Ctrl+C directly
-	newM, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	newM, cmd = m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	_ = newM
 	_ = cmd
 }
@@ -81,7 +81,7 @@ func TestConnectModel_Update_FormState(t *testing.T) {
 	m.showDbList = false
 
 	// Test Tab key
-	newM, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	newM, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	cm := newM.(*ConnectModel)
 	if cm.focusIndex != 1 {
 		t.Errorf("Tab should move to next field, got focusIndex = %v", cm.focusIndex)
@@ -91,7 +91,7 @@ func TestConnectModel_Update_FormState(t *testing.T) {
 	}
 
 	// Test Esc key to go back to welcome
-	newM, cmd = cm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	newM, cmd = cm.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	cm = newM.(*ConnectModel)
 	if cm.state != StateWelcome {
 		t.Errorf("Esc should switch to StateWelcome, got state = %v", cm.state)

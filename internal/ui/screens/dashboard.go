@@ -49,7 +49,7 @@
 package screens
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"time"
 
 	"github.com/jupiterozeye/tornado/internal/db"
@@ -177,24 +177,8 @@ func (m *DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // TODO: Implement chart layout:
 //   - Top row: Line chart (QPS) and bar chart (distribution)
 //   - Bottom: Stats summary and sparklines
-func (m *DashboardModel) View() string {
-	// TODO: Implement view with ntcharts
-	//
-	// Structure:
-	// qpsChart := m.renderQPSChart()
-	// distChart := m.renderDistributionChart()
-	// stats := m.renderStats()
-	// return lipgloss.JoinVertical(...)
-	//
-	// ntcharts example:
-	// slc := streamlinechart.New(width, height)
-	// for _, v := range dataPoints {
-	//     slc.Push(v)
-	// }
-	// slc.Draw()
-	// return slc.View()
-
-	return "Dashboard Screen\n\nTODO: Implement traffic charts"
+func (m *DashboardModel) View() tea.View {
+	return tea.NewView("Dashboard Screen\n\nTODO: Implement traffic charts")
 }
 
 // Helper methods

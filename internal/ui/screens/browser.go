@@ -19,20 +19,21 @@
 //   - r: Refresh tree
 //
 // References:
-//   - https://github.com/charmbracelet/bubbles#table
-//   - https://github.com/charmbracelet/bubbles#list
+//   - https://charm.land/bubbles/v2#table
+//   - https://charm.land/bubbles/v2#list
 package screens
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
-	"time"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"
@@ -40,11 +41,6 @@ import (
 	"github.com/jupiterozeye/tornado/internal/ui/layout"
 	"github.com/jupiterozeye/tornado/internal/ui/styles"
 )
-
-// leaderShowMenuMsg is sent after the leader key timeout expires.
-type leaderShowMenuMsg struct{}
-
-const leaderTimeout = 350 * time.Millisecond
 
 // Pane represents which pane has focus
 type Pane int
@@ -89,7 +85,6 @@ type BrowserModel struct {
 	queryMode     QueryMode
 	styles        *styles.Styles
 	showExplorer  bool
-	leaderPending bool // waiting for follow-up key (before timeout)
 	leaderActive  bool // menu popup is visible
 	themeMenu     bool
 	themeList     list.Model
@@ -164,28 +159,13 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layoutManager.Update(msg.Width, usableHeight)
 		m.updateComponentSizes()
 
-	case leaderShowMenuMsg:
-		// Timer expired — show the menu popup if still pending
-		if m.leaderPending {
-			m.leaderPending = false
-			m.leaderActive = true
-			m.statusMsg = ""
-		}
-		return m, nil
-
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.themeMenu {
 			return m.handleThemeMenuKey(msg)
 		}
 
 		if m.leaderActive {
 			return m.handleLeaderKey(msg)
-		}
-
-		// Leader pending: intercept the follow-up key
-		if m.leaderPending {
-			m.leaderPending = false
-			return m.executeLeaderCommand(msg.String())
 		}
 
 		if m.focusedPane == PaneExplorer {
@@ -197,15 +177,15 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Global key bindings
 		switch msg.String() {
-		case " ":
-			// Start leader pending — wait for follow-up key or timeout
-			m.leaderPending = true
-			m.leaderActive = false
+		case "space":
+			if m.focusedPane == PaneQuery && m.queryMode == QueryModeInsert {
+				return m.routeKeyMsg(msg)
+			}
+			// Show leader menu immediately
+			m.leaderActive = true
 			m.themeMenu = false
 			m.statusMsg = ""
-			return m, tea.Tick(leaderTimeout, func(t time.Time) tea.Msg {
-				return leaderShowMenuMsg{}
-			})
+			return m, nil
 		case "e":
 			m.focusedPane = PaneExplorer
 			m.updateFocus()
@@ -258,9 +238,9 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the browser screen.
-func (m *BrowserModel) View() string {
+func (m *BrowserModel) View() tea.View {
 	if m.width == 0 || m.height == 0 {
-		return "Loading..."
+		return tea.View{Content: "Loading..."}
 	}
 
 	ew, eh, qw, qh, rw, rh := m.paneDimensions()
@@ -268,13 +248,13 @@ func (m *BrowserModel) View() string {
 	// Render explorer
 	var explorerContent string
 	if m.explorer != nil {
-		explorerContent = m.explorer.View()
+		explorerContent = m.explorer.View().Content
 	} else {
 		explorerContent = "Loading..."
 	}
 	explorerPane := ""
 	if m.showExplorer {
-		explorerPane = m.renderPane("Explorer", "e", explorerContent, ew, eh, m.focusedPane == PaneExplorer)
+		explorerPane = m.renderPane("Explorer", "e", explorerContent, ew, eh, m.focusedPane == PaneExplorer, styles.BgDefault)
 	}
 
 	// Render query editor
@@ -282,11 +262,11 @@ func (m *BrowserModel) View() string {
 	if m.queryMode == QueryModeInsert {
 		queryTitle = "Query [INSERT]"
 	}
-	queryPane := m.renderPane(queryTitle, "q", m.query.View(), qw, qh, m.focusedPane == PaneQuery)
+	queryPane := m.renderPane(queryTitle, "q", m.query.View(), qw, qh, m.focusedPane == PaneQuery, styles.BgDark)
 
 	// Render results
 	resultsContent := m.renderResults()
-	resultsPane := m.renderPane("Results", "r", resultsContent, rw, rh, m.focusedPane == PaneResults)
+	resultsPane := m.renderPane("Results", "r", resultsContent, rw, rh, m.focusedPane == PaneResults, styles.BgDefault)
 
 	// Combine right side panes vertically
 	rightSide := lipgloss.JoinVertical(
@@ -303,26 +283,27 @@ func (m *BrowserModel) View() string {
 	if m.maximizedPane != PaneNone {
 		switch m.maximizedPane {
 		case PaneExplorer:
-			main = m.renderPane("Explorer", "e", explorerContent, m.width, m.mainHeight(), m.focusedPane == PaneExplorer)
+			main = m.renderPane("Explorer", "e", explorerContent, m.width, m.mainHeight(), m.focusedPane == PaneExplorer, styles.BgDefault)
 		case PaneQuery:
-			main = m.renderPane(queryTitle, "q", m.query.View(), m.width, m.mainHeight(), m.focusedPane == PaneQuery)
+			main = m.renderPane(queryTitle, "q", m.query.View(), m.width, m.mainHeight(), m.focusedPane == PaneQuery, styles.BgDark)
 		case PaneResults:
-			main = m.renderPane("Results", "r", resultsContent, m.width, m.mainHeight(), m.focusedPane == PaneResults)
+			main = m.renderPane("Results", "r", resultsContent, m.width, m.mainHeight(), m.focusedPane == PaneResults, styles.BgDefault)
 		}
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, main, m.renderContextFooter())
-	out := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, content,
-		lipgloss.WithWhitespaceBackground(styles.BgDefault))
+	base := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, content,
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(styles.BgDefault)))
 
+	// Use lipgloss compositing for overlays
 	if m.leaderActive {
-		out = m.overlayLeaderMenu(out)
+		return tea.View{Content: m.renderWithLeaderMenu(base)}
 	}
 	if m.themeMenu {
-		out = m.overlayThemeMenu(out)
+		return tea.View{Content: m.renderWithThemeMenu(base)}
 	}
 
-	return out
+	return tea.View{Content: base}
 }
 
 func (m *BrowserModel) decoratePane(title, key, content string, paneWidth, paneHeight int) string {
@@ -340,7 +321,7 @@ func (m *BrowserModel) decoratePane(title, key, content string, paneWidth, paneH
 	return lipgloss.JoinVertical(lipgloss.Left, header, body)
 }
 
-func (m *BrowserModel) renderPane(title, key, content string, paneWidth, paneHeight int, focused bool) string {
+func (m *BrowserModel) renderPane(title, key, content string, paneWidth, paneHeight int, focused bool, bodyBg color.Color) string {
 	if paneWidth < 4 {
 		paneWidth = 4
 	}
@@ -373,7 +354,7 @@ func (m *BrowserModel) renderPane(title, key, content string, paneWidth, paneHei
 		Foreground(borderColor).
 		Background(styles.BgDefault)
 	bodyStyle := lipgloss.NewStyle().
-		Background(styles.BgDefault).
+		Background(bodyBg).
 		Width(innerWidth)
 
 	var out []string
@@ -433,11 +414,6 @@ func (m *BrowserModel) paneDimensions() (ew, eh, qw, qh, rw, rh int) {
 }
 
 func (m *BrowserModel) renderContextFooter() string {
-	if m.leaderPending {
-		line := truncateToWidth("... waiting for command key (e/f/c/x/t/h/q)", m.width)
-		line = padToWidth(line, m.width)
-		return m.styles.StatusBar.Render(line)
-	}
 	if m.leaderActive {
 		line := truncateToWidth("COMMANDS: e Explorer  f Maximize  c Connect  x Disconnect  t Theme  h Help  / Search  q Quit", m.width)
 		line = padToWidth(line, m.width)
@@ -487,7 +463,7 @@ func (m *BrowserModel) explorerFooterText() string {
 }
 
 // handleLeaderKey handles key presses when the leader menu popup is visible.
-func (m *BrowserModel) handleLeaderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *BrowserModel) handleLeaderKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "esc" {
 		m.leaderActive = false
 		m.statusMsg = ""
@@ -548,7 +524,7 @@ func (m *BrowserModel) executeLeaderCommand(key string) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m *BrowserModel) handleThemeMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *BrowserModel) handleThemeMenuKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.themeMenu = false
@@ -572,7 +548,7 @@ func (m *BrowserModel) handleThemeMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	node := (*components.TreeNode)(nil)
 	if m.explorer != nil {
 		node = m.explorer.CurrentNode()
@@ -595,7 +571,7 @@ func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	case "f":
 		if m.explorer != nil {
-			_, cmd := m.explorer.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+			_, cmd := m.explorer.Update(tea.KeyPressMsg{Text: "r"})
 			m.statusMsg = "Explorer refreshed"
 			return true, cmd
 		}
@@ -610,59 +586,53 @@ func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
-func (m *BrowserModel) overlayLeaderMenu(base string) string {
-	menu := renderDialogBox("Commands", buildLeaderMenuLines(), "esc Close", 40)
-	return m.overlayBottomRight(base, menu, 2, 1)
+// renderWithLeaderMenu uses lipgloss compositing to overlay the leader menu
+func (m *BrowserModel) renderWithLeaderMenu(base string) string {
+	menuContent := buildLeaderMenuContent()
+	menu := renderStyledBox("Commands", menuContent, "esc Close", 38)
+
+	// Position in bottom right
+	boxH := len(strings.Split(menu, "\n"))
+	boxW := 38
+	x := m.width - boxW - 2
+	y := m.height - boxH - 1
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+
+	// Use lipgloss compositing
+	baseLayer := lipgloss.NewLayer(base)
+	menuLayer := lipgloss.NewLayer(menu).X(x).Y(y).Z(1)
+
+	comp := lipgloss.NewCompositor(baseLayer, menuLayer)
+	return comp.Render()
 }
 
-func (m *BrowserModel) overlayThemeMenu(base string) string {
+// renderWithThemeMenu uses lipgloss compositing to overlay the theme menu centered
+func (m *BrowserModel) renderWithThemeMenu(base string) string {
 	lines := strings.Split(m.themeList.View(), "\n")
 	menu := renderDialogBox("Themes", lines, "enter Select · esc Cancel", 44)
-	return m.overlayCentered(base, menu)
-}
 
-func (m *BrowserModel) overlayCentered(base, box string) string {
-	boxLines := strings.Split(box, "\n")
-	boxW := 0
-	for _, line := range boxLines {
-		if w := lipgloss.Width(line); w > boxW {
-			boxW = w
-		}
-	}
-	boxH := len(boxLines)
-
+	// Center position
+	boxH := len(strings.Split(menu, "\n"))
+	boxW := 44
 	x := (m.width - boxW) / 2
-	if x < 0 {
-		x = 0
-	}
 	y := (m.height - boxH) / 2
-	if y < 0 {
-		y = 0
-	}
-
-	return overlayBoxAt(base, box, x, y, m.height)
-}
-
-func (m *BrowserModel) overlayBottomRight(base, box string, marginRight, marginBottom int) string {
-	boxLines := strings.Split(box, "\n")
-	boxW := 0
-	for _, line := range boxLines {
-		if w := lipgloss.Width(line); w > boxW {
-			boxW = w
-		}
-	}
-	boxH := len(boxLines)
-
-	x := m.width - boxW - marginRight
 	if x < 0 {
 		x = 0
 	}
-	y := m.height - boxH - marginBottom
 	if y < 0 {
 		y = 0
 	}
 
-	return overlayBoxAt(base, box, x, y, m.height)
+	baseLayer := lipgloss.NewLayer(base)
+	menuLayer := lipgloss.NewLayer(menu).X(x).Y(y).Z(1)
+
+	comp := lipgloss.NewCompositor(baseLayer, menuLayer)
+	return comp.Render()
 }
 
 func buildLeaderMenuLines() []string {
@@ -685,6 +655,64 @@ func buildLeaderMenuLines() []string {
 	}
 }
 
+// buildLeaderMenuContent creates styled content for the leader menu popup
+func buildLeaderMenuContent() []string {
+	return buildLeaderMenuLines()
+}
+
+// renderStyledBox creates a styled popup box similar to renderDialogBox but optimized for menus
+func renderStyledBox(title string, body []string, subtitle string, width int) string {
+	if width < 14 {
+		width = 14
+	}
+
+	innerWidth := width - 2
+	borderStyle := lipgloss.NewStyle().
+		Foreground(styles.BorderFocus).
+		Background(styles.BgDark)
+	bodyStyle := lipgloss.NewStyle().
+		Background(styles.BgDark).
+		Width(innerWidth)
+
+	out := make([]string, 0, len(body)+2)
+	out = append(out, borderStyle.Render("╭"+makeMenuTopBorder(title, innerWidth)+"╮"))
+
+	for _, line := range body {
+		line = truncateToWidth(line, innerWidth)
+		out = append(out, borderStyle.Render("│")+bodyStyle.Render(line)+borderStyle.Render("│"))
+	}
+
+	out = append(out, borderStyle.Render("╰"+makeMenuBottomBorder(subtitle, innerWidth)+"╯"))
+	return strings.Join(out, "\n")
+}
+
+func makeMenuTopBorder(label string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	segment := "─ " + label + " "
+	segment = truncateToWidth(segment, width)
+	if lipgloss.Width(segment) < width {
+		segment += strings.Repeat("─", width-lipgloss.Width(segment))
+	}
+	return segment
+}
+
+func makeMenuBottomBorder(label string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	if label == "" {
+		return strings.Repeat("─", width)
+	}
+	segment := " " + label + " ─"
+	if lipgloss.Width(segment) > width {
+		return strings.Repeat("─", width)
+	}
+	left := strings.Repeat("─", width-lipgloss.Width(segment))
+	return left + segment
+}
+
 type RequestConnectMsg struct{}
 
 func clipText(content string, width, height int) string {
@@ -702,27 +730,10 @@ func truncateToWidth(s string, width int) string {
 	if width < 1 {
 		return ""
 	}
-	if lipgloss.Width(s) <= width {
-		return s
+	if width == 1 {
+		return xansi.Truncate(s, width, "")
 	}
-
-	max := width
-	if width > 1 {
-		max = width - 1
-	}
-
-	var b strings.Builder
-	for _, r := range s {
-		next := b.String() + string(r)
-		if lipgloss.Width(next) > max {
-			break
-		}
-		b.WriteRune(r)
-	}
-	if width > 1 {
-		return b.String() + "…"
-	}
-	return b.String()
+	return xansi.Truncate(s, width, "…")
 }
 
 // Helper methods
@@ -784,7 +795,7 @@ func (m *BrowserModel) updateFocus() {
 	}
 }
 
-func (m *BrowserModel) routeKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *BrowserModel) routeKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch m.focusedPane {
 	case PaneExplorer:
 		if m.explorer != nil {
@@ -907,6 +918,8 @@ func (m *BrowserModel) updateResultsTable() {
 		rows[i] = rowData
 	}
 
+	// Clear rows first to prevent index mismatch when columns change
+	m.results.SetRows([]table.Row{})
 	m.results.SetColumns(columns)
 	m.results.SetRows(rows)
 }
@@ -933,24 +946,28 @@ func (m *BrowserModel) renderResults() string {
 }
 
 func applyTextAreaStyles(ta *textarea.Model) {
+	s := ta.Styles()
 	bgStyle := lipgloss.NewStyle().Background(styles.BgDark)
-	ta.FocusedStyle.Base = bgStyle
-	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark)
-	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	ta.FocusedStyle.LineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle().Background(styles.BgLight)
-	ta.FocusedStyle.CursorLineNumber = lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgLight)
-	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgDark)
 
-	ta.BlurredStyle.Base = bgStyle
-	ta.BlurredStyle.Text = lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark)
-	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	ta.BlurredStyle.LineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	ta.BlurredStyle.CursorLine = lipgloss.NewStyle().Background(styles.BgDark)
-	ta.BlurredStyle.CursorLineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	ta.BlurredStyle.EndOfBuffer = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
+	s.Focused.Base = bgStyle
+	s.Focused.Text = lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark)
+	s.Focused.Placeholder = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
+	s.Focused.LineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
+	s.Focused.CursorLine = lipgloss.NewStyle().Background(styles.BgLight)
+	s.Focused.CursorLineNumber = lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgLight)
+	s.Focused.EndOfBuffer = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
+	s.Focused.Prompt = lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgDark)
+
+	s.Blurred.Base = bgStyle
+	s.Blurred.Text = lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark)
+	s.Blurred.Placeholder = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
+	s.Blurred.LineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
+	s.Blurred.CursorLine = lipgloss.NewStyle().Background(styles.BgDark)
+	s.Blurred.CursorLineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
+	s.Blurred.EndOfBuffer = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
+	s.Blurred.Prompt = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
+
+	ta.SetStyles(s)
 }
 
 func applyTableStyles(t *table.Model) {

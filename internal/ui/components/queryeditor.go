@@ -22,12 +22,11 @@
 //   - textarea.Model for the text input
 //
 // References:
-//   - https://github.com/charmbracelet/bubbles#text-area
+//   - https://charm.land/bubbles/v2#text-area
 package components
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
-
+	tea "charm.land/bubbletea/v2"
 )
 
 // QueryEditor is a SQL query editor component.
@@ -110,10 +109,10 @@ func (q *QueryEditor) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the query editor.
 //
 // TODO: Render with syntax highlighting
-func (q *QueryEditor) View() string {
+func (q *QueryEditor) View() tea.View {
 	// TODO: Return rendered editor
 	// return q.editor.View()
-	return "QueryEditor - TODO"
+	return tea.View{Content: "QueryEditor - TODO"}
 }
 
 // Value returns the current SQL query text.

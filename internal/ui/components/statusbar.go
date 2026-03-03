@@ -29,12 +29,11 @@
 //	They still implement the tea.Model interface but Update just returns.
 //
 // References:
-//   - https://github.com/charmbracelet/lipgloss#joining
+//   - https://charm.land/lipgloss/v2#joining
 package components
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
-
+	tea "charm.land/bubbletea/v2"
 )
 
 // StatusBar displays application status at the bottom of the screen.
@@ -99,7 +98,7 @@ func (s *StatusBar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 //	[Connection] | [Screen] | [Info] | [Keybindings]
 //	If error: show error in red
 //	If loading: show spinner
-func (s *StatusBar) View() string {
+func (s *StatusBar) View() tea.View {
 	// TODO: Build status bar with lipgloss.JoinHorizontal
 	//
 	// leftSection := s.renderConnection()
@@ -113,7 +112,7 @@ func (s *StatusBar) View() string {
 	//     rightSection,
 	// )
 
-	return "StatusBar - TODO"
+	return tea.View{Content: "StatusBar - TODO"}
 }
 
 // SetConnection sets the connection display name.

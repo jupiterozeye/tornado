@@ -24,11 +24,11 @@
 //   - viewport.Model for scrolling (if needed)
 //
 // References:
-//   - https://github.com/charmbracelet/bubbles#table
+//   - https://charm.land/bubbles/v2#table
 package components
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jupiterozeye/tornado/internal/models"
 )
@@ -114,10 +114,10 @@ func (t *TableViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the table viewer.
 //
 // TODO: Render table with styling
-func (t *TableViewer) View() string {
+func (t *TableViewer) View() tea.View {
 	// TODO: Return rendered table
 	// return t.table.View()
-	return "TableViewer - TODO"
+	return tea.View{Content: "TableViewer - TODO"}
 }
 
 // SetData populates the table with query results.

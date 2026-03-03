@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"
@@ -106,7 +106,7 @@ func (m *ExplorerModel) Init() tea.Cmd {
 // Update handles messages
 func (m *ExplorerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "j", "down":
 			m.moveDown()
@@ -145,9 +145,9 @@ func (m *ExplorerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the explorer
-func (m *ExplorerModel) View() string {
+func (m *ExplorerModel) View() tea.View {
 	if len(m.flatList) == 0 {
-		return lipgloss.NewStyle().Background(styles.BgDefault).Render("Loading...")
+		return tea.View{Content: lipgloss.NewStyle().Background(styles.BgDefault).Render("Loading...")}
 	}
 
 	var lines []string
@@ -175,7 +175,7 @@ func (m *ExplorerModel) View() string {
 		visibleCount++
 	}
 
-	return strings.Join(lines, "\n")
+	return tea.View{Content: strings.Join(lines, "\n")}
 }
 
 // Helper methods

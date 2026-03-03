@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jupiterozeye/tornado/internal/assets"
 	"github.com/jupiterozeye/tornado/internal/db"
@@ -163,11 +163,11 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch m.state {
 		case StateWelcome:
 			switch msg.String() {
-			case " ":
+			case "space":
 				m.state = StateForm
 				m.focusIndex = 0
 				m.showDbList = true
@@ -233,7 +233,7 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *ConnectModel) handleFormKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *ConnectModel) handleFormKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.state = StateWelcome
@@ -284,7 +284,7 @@ func (m *ConnectModel) handleFormKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m *ConnectModel) updateFocusedInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *ConnectModel) updateFocusedInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focusIndex {
 	case 1:
@@ -304,18 +304,54 @@ func (m *ConnectModel) updateFocusedInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the connection screen.
-func (m *ConnectModel) View() string {
-	base := m.viewWelcome()
+func (m *ConnectModel) View() tea.View {
+	var content string
 	switch m.state {
 	case StateWelcome:
-		return base
+		content = m.viewWelcome()
 	case StateForm:
-		return m.overlayCentered(base, m.viewForm())
+		content = m.viewFormScreen()
 	case StateConnecting:
-		return m.overlayCentered(base, m.viewConnecting())
+		content = m.viewConnectingScreen()
 	default:
-		return base
+		content = m.viewWelcome()
 	}
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
+}
+
+// viewFormScreen renders the form dialog on a solid background (no animation)
+func (m *ConnectModel) viewFormScreen() string {
+	dialog := m.viewForm()
+	// Center the dialog on top of solid background using pure composition
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog,
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(styles.BgDefault)))
+}
+
+// viewConnectingScreen renders the connecting dialog on a solid background
+func (m *ConnectModel) viewConnectingScreen() string {
+	dialog := m.viewConnecting()
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog,
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(styles.BgDefault)))
+}
+
+// viewWelcomeBackground returns a solid background with logo and help (no animation)
+func (m *ConnectModel) viewWelcomeBackground() string {
+	logoStyle := lipgloss.NewStyle().Foreground(styles.Primary)
+	logo := logoStyle.Render(assets.Logo)
+
+	helpStyle := lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		MarginTop(2)
+	help := helpStyle.Render("Space: Connect | Ctrl+C: Quit")
+
+	fullLogo := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, logo)
+	fullHelp := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help)
+	content := lipgloss.JoinVertical(lipgloss.Left, fullLogo, fullHelp)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(styles.BgDefault)))
 }
 
 func (m *ConnectModel) viewWelcome() string {
@@ -530,7 +566,26 @@ func (m *ConnectModel) overlayCentered(base, box string) string {
 	if m.width == 0 || m.height == 0 {
 		return box
 	}
-	return compositeOverlay(base, box, m.width, m.height)
+
+	boxLines := strings.Split(box, "\n")
+	boxW := 0
+	for _, line := range boxLines {
+		if w := lipgloss.Width(line); w > boxW {
+			boxW = w
+		}
+	}
+	boxH := len(boxLines)
+
+	x := (m.width - boxW) / 2
+	if x < 0 {
+		x = 0
+	}
+	y := (m.height - boxH) / 2
+	if y < 0 {
+		y = 0
+	}
+
+	return overlayBoxAt(base, box, x, y, m.height)
 }
 
 // Helper methods

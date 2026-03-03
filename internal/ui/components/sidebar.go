@@ -35,12 +35,11 @@
 //   - list.Model for the table list
 //
 // References:
-//   - https://github.com/charmbracelet/bubbles#list
+//   - https://charm.land/bubbles/v2#list
 package components
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
-
+	tea "charm.land/bubbletea/v2"
 )
 
 // Sidebar is a navigation component for browsing database objects.
@@ -147,10 +146,10 @@ func (s *Sidebar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the sidebar.
 //
 // TODO: Render list with styling
-func (s *Sidebar) View() string {
+func (s *Sidebar) View() tea.View {
 	// TODO: Return rendered list
 	// return s.list.View()
-	return "Sidebar - TODO"
+	return tea.View{Content: "Sidebar - TODO"}
 }
 
 // SetTables sets the list of tables to display.

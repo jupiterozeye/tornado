@@ -2,7 +2,7 @@
 package layout
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // Pane represents a UI pane with position and size

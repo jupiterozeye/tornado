@@ -39,11 +39,11 @@
 //   - spinner.Model for query in progress
 //
 // References:
-//   - https://github.com/charmbracelet/bubbles#text-area
+//   - https://charm.land/bubbles/v2#text-area
 package screens
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"
@@ -149,15 +149,8 @@ func (m *QueryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // TODO: Implement split-pane layout:
 //   - Top: SQL editor (textarea)
 //   - Bottom: Results table or error message
-func (m *QueryModel) View() string {
-	// TODO: Implement view
-	//
-	// Structure:
-	// editor := m.editor.View()
-	// results := m.renderResults()
-	// return lipgloss.JoinVertical(lipgloss.Left, editor, results)
-
-	return "Query Screen\n\nTODO: Implement query editor"
+func (m *QueryModel) View() tea.View {
+	return tea.NewView("Query Screen\n\nTODO: Implement query editor")
 }
 
 // Helper methods
