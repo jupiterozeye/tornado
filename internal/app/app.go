@@ -128,6 +128,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentScreen = msg.Screen
 		return a, a.getActiveScreen().Init()
 
+	case screens.RequestConnectMsg:
+		if a.db != nil {
+			_ = a.db.Disconnect()
+			a.db = nil
+		}
+		a.connectScreen = screens.NewConnectModel()
+		a.currentScreen = ScreenConnect
+		return a, a.connectScreen.Init()
+
 	case ErrorMsg:
 		a.err = msg.Err
 		return a, nil

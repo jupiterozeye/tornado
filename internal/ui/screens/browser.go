@@ -69,11 +69,14 @@ type BrowserModel struct {
 	results  table.Model
 
 	// State
-	width       int
-	height      int
-	focusedPane Pane
-	queryMode   QueryMode
-	styles      *styles.Styles
+	width        int
+	height       int
+	focusedPane  Pane
+	queryMode    QueryMode
+	styles       *styles.Styles
+	showExplorer bool
+	leaderActive bool
+	statusMsg    string
 
 	// Query results
 	currentResults *models.QueryResult
@@ -113,6 +116,7 @@ func NewBrowserModel(database db.Database) *BrowserModel {
 		focusedPane:   PaneExplorer,
 		queryMode:     QueryModeNormal,
 		styles:        s,
+		showExplorer:  true,
 	}
 }
 
@@ -127,12 +131,31 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.layoutManager.Update(msg.Width, msg.Height)
+		usableHeight := msg.Height - 1 // reserve one line for contextual footer
+		if usableHeight < 3 {
+			usableHeight = 3
+		}
+		m.layoutManager.Update(msg.Width, usableHeight)
 		m.updateComponentSizes()
 
 	case tea.KeyMsg:
+		if m.leaderActive {
+			return m.handleLeaderKey(msg)
+		}
+
+		if m.focusedPane == PaneExplorer {
+			handled, cmd := m.handleExplorerActionKey(msg)
+			if handled {
+				return m, cmd
+			}
+		}
+
 		// Global key bindings
 		switch msg.String() {
+		case " ":
+			m.leaderActive = true
+			m.statusMsg = "Command menu: e toggle explorer, f maximize pane, c connect, x disconnect, t theme, h help, / search, q quit"
+			return m, nil
 		case "e":
 			m.focusedPane = PaneExplorer
 			m.updateFocus()
@@ -201,7 +224,10 @@ func (m *BrowserModel) View() string {
 	} else {
 		explorerContent = "Loading..."
 	}
-	explorerPane := m.renderPane("Explorer", "e", explorerContent, ew, eh, m.focusedPane == PaneExplorer)
+	explorerPane := ""
+	if m.showExplorer {
+		explorerPane = m.renderPane("Explorer", "e", explorerContent, ew, eh, m.focusedPane == PaneExplorer)
+	}
 
 	// Render query editor
 	queryTitle := "Query [NORMAL]"
@@ -221,11 +247,14 @@ func (m *BrowserModel) View() string {
 		resultsPane,
 	)
 
-	main := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		explorerPane,
-		rightSide,
-	)
+	main := rightSide
+	if m.showExplorer {
+		main = lipgloss.JoinHorizontal(lipgloss.Top, explorerPane, rightSide)
+	}
+
+	if m.leaderActive {
+		main = m.overlayLeaderMenu(main)
+	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, main, m.renderContextFooter())
 }
@@ -308,10 +337,16 @@ func padToWidth(s string, width int) string {
 }
 
 func (m *BrowserModel) renderContextFooter() string {
+	if m.leaderActive {
+		line := truncateToWidth("COMMANDS: e Explorer  f Maximize  c Connect  x Disconnect  t Theme  h Help  / Search  q Quit", m.width)
+		line = padToWidth(line, m.width)
+		return m.styles.StatusBar.Render(line)
+	}
+
 	var text string
 	switch m.focusedPane {
 	case PaneExplorer:
-		text = "Explorer: j/k Move  Enter Expand/Collapse  s Select TOP 100  r Refresh"
+		text = m.explorerFooterText()
 	case PaneQuery:
 		if m.queryMode == QueryModeInsert {
 			text = "Query INSERT: Esc Normal  Enter Newline"
@@ -323,9 +358,131 @@ func (m *BrowserModel) renderContextFooter() string {
 	}
 
 	line := truncateToWidth(text, m.width)
+	if m.statusMsg != "" {
+		status := " | " + m.statusMsg
+		line = truncateToWidth(line+status, m.width)
+	}
 	line = padToWidth(line, m.width)
 	return m.styles.StatusBar.Render(line)
 }
+
+func (m *BrowserModel) explorerFooterText() string {
+	node := (*components.TreeNode)(nil)
+	if m.explorer != nil {
+		node = m.explorer.CurrentNode()
+	}
+	if node == nil {
+		return "Explorer: j/k Move  Enter Expand/Collapse  s Select TOP 100  r Refresh  Commands <space>  Help ?"
+	}
+
+	switch node.Type {
+	case components.NodeRoot:
+		return "Disconnect: x  New: n  Edit: e  Move: m  Delete: d  Refresh: f  Commands: <space>  Help: ?"
+	case components.NodeTable:
+		return "Columns: enter  Select TOP 100: s  Refresh: f  Commands: <space>  Help: ?"
+	default:
+		return "Expand/Collapse: enter  Select TOP 100: s  Refresh: f  Commands: <space>  Help: ?"
+	}
+}
+
+func (m *BrowserModel) handleLeaderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.leaderActive = false
+	key := msg.String()
+	switch key {
+	case "e":
+		m.showExplorer = !m.showExplorer
+		m.statusMsg = "Toggled explorer"
+		return m, nil
+	case "f":
+		m.statusMsg = "Maximize pane: not implemented yet"
+		return m, nil
+	case "c":
+		return m, func() tea.Msg { return RequestConnectMsg{} }
+	case "x":
+		if m.db != nil {
+			_ = m.db.Disconnect()
+		}
+		return m, func() tea.Msg { return RequestConnectMsg{} }
+	case "t":
+		m.statusMsg = "Theme toggle: not implemented yet"
+		return m, nil
+	case "h", "?":
+		m.statusMsg = "Help: e/q/r focus, space command menu, enter run query in NORMAL"
+		return m, nil
+	case "/":
+		m.statusMsg = "Search: not implemented yet"
+		return m, nil
+	case "q":
+		return m, tea.Quit
+	default:
+		m.statusMsg = "Unknown command"
+		return m, nil
+	}
+}
+
+func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+	node := (*components.TreeNode)(nil)
+	if m.explorer != nil {
+		node = m.explorer.CurrentNode()
+	}
+
+	switch msg.String() {
+	case "x":
+		if m.db != nil {
+			_ = m.db.Disconnect()
+		}
+		return true, func() tea.Msg { return RequestConnectMsg{} }
+	case "n":
+		m.statusMsg = "New connection: coming soon"
+		return true, nil
+	case "m":
+		m.statusMsg = "Move: coming soon"
+		return true, nil
+	case "d":
+		m.statusMsg = "Delete: coming soon"
+		return true, nil
+	case "f":
+		if m.explorer != nil {
+			_, cmd := m.explorer.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+			m.statusMsg = "Explorer refreshed"
+			return true, cmd
+		}
+		return true, nil
+	case "e":
+		if node != nil && node.Type == components.NodeRoot {
+			m.statusMsg = "Edit connection: coming soon"
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (m *BrowserModel) overlayLeaderMenu(base string) string {
+	menu := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.BorderFocus).
+		Padding(1, 2).
+		Background(styles.BgDark).
+		Render(strings.Join([]string{
+			"Command Menu (<space>)",
+			"",
+			"e  Toggle Explorer",
+			"f  Toggle Maximize",
+			"c  Connect",
+			"x  Disconnect",
+			"t  Change Theme",
+			"h  Help",
+			"/  Telescope Search",
+			"q  Quit",
+			"",
+			"Esc/any other key closes",
+		}, "\n"))
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, base+"\n"+menu)
+}
+
+type RequestConnectMsg struct{}
 
 func clipText(content string, width, height int) string {
 	lines := strings.Split(content, "\n")
