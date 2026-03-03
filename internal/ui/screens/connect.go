@@ -179,7 +179,20 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleEnter()
 		default:
 			// Pass character input to focused field
-			return m.updateFocusedInput(msg)
+			// Capture old db type to detect changes
+			oldDbType := m.dbTypeInput.Value()
+			newModel, cmd := m.updateFocusedInput(msg)
+			// Check if db type changed
+			if m.focusIndex == 0 && oldDbType != m.dbTypeInput.Value() {
+				// DB type changed, adjust focus if needed
+				maxIndex := m.getMaxFieldIndex()
+				if m.focusIndex > maxIndex {
+					m.focusIndex = maxIndex
+					m.blurAllFields()
+					m.focusCurrentField()
+				}
+			}
+			return newModel, cmd
 		}
 
 		// For navigation keys, still update focused input for cursor blinking
@@ -202,14 +215,16 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the connection screen.
 //
 // Layout structure:
-//   - Title/header
+//   - Title/header (centered logo)
 //   - Database type selector
 //   - Form fields (different based on db type)
 //   - Error message (if any)
 //   - Help/keybindings
 func (m *ConnectModel) View() string {
-	// Logo header
-	logoStyle := lipgloss.NewStyle().Foreground(styles.Primary)
+	// Centered logo header
+	logoStyle := lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Align(lipgloss.Center)
 	logo := logoStyle.Render(assets.Logo)
 
 	// Show connecting message if connecting
@@ -223,63 +238,61 @@ func (m *ConnectModel) View() string {
 		)
 	}
 
+	// Determine which DB type is selected
+	dbType := m.dbTypeInput.Value()
+	if dbType == "" {
+		dbType = "sqlite" // default
+	}
+	isSQLite := dbType == "sqlite" || dbType == "SQLite"
+
 	// Form section header
 	formHeader := m.styles.Subheader.Render("Connection Details")
 
-	// Database type field
+	// Build dynamic content based on DB type
+	var content []string
+	content = append(content, logo, "", formHeader, "")
+
+	// Database type field (always shown)
 	dbTypeLabel := "Database Type (sqlite/postgres):"
 	dbTypeField := m.renderField(dbTypeLabel, m.dbTypeInput.View(), 0)
+	content = append(content, dbTypeField, "")
 
-	// SQLite section
-	sqliteHeader := m.styles.Header.Render("SQLite Settings")
-	pathLabel := "File Path:"
-	pathField := m.renderField(pathLabel, m.pathInput.View(), 1)
-
-	// PostgreSQL section
-	postgresHeader := m.styles.Header.Render("PostgreSQL Settings")
-	hostLabel := "Host:"
-	hostField := m.renderField(hostLabel, m.hostInput.View(), 2)
-	portLabel := "Port:"
-	portField := m.renderField(portLabel, m.portInput.View(), 3)
-	userLabel := "Username:"
-	userField := m.renderField(userLabel, m.userInput.View(), 4)
-	passwordLabel := "Password:"
-	passwordField := m.renderField(passwordLabel, m.passwordInput.View(), 5)
-	dbLabel := "Database Name:"
-	dbField := m.renderField(dbLabel, m.databaseInput.View(), 6)
+	if isSQLite {
+		// SQLite section only
+		sqliteHeader := m.styles.Header.Render("SQLite Settings")
+		pathLabel := "File Path:"
+		pathField := m.renderField(pathLabel, m.pathInput.View(), 1)
+		content = append(content, sqliteHeader, pathField)
+	} else {
+		// PostgreSQL section only
+		postgresHeader := m.styles.Header.Render("PostgreSQL Settings")
+		hostLabel := "Host:"
+		hostField := m.renderField(hostLabel, m.hostInput.View(), 2)
+		portLabel := "Port:"
+		portField := m.renderField(portLabel, m.portInput.View(), 3)
+		userLabel := "Username:"
+		userField := m.renderField(userLabel, m.userInput.View(), 4)
+		passwordLabel := "Password:"
+		passwordField := m.renderField(passwordLabel, m.passwordInput.View(), 5)
+		dbLabel := "Database Name:"
+		dbField := m.renderField(dbLabel, m.databaseInput.View(), 6)
+		content = append(content,
+			postgresHeader,
+			hostField,
+			portField,
+			userField,
+			passwordField,
+			dbField,
+		)
+	}
 
 	// Error message
-	var errorSection string
 	if m.errorMsg != "" {
-		errorSection = m.styles.Error.Render("Error: " + m.errorMsg)
+		content = append(content, "", m.styles.Error.Render("Error: "+m.errorMsg))
 	}
 
 	// Help text
 	help := m.styles.Muted.Render("Tab/Shift+Tab: Navigate | Up/Down: Move | Enter: Connect | Ctrl+C: Quit")
-
-	// Combine all sections
-	content := []string{
-		logo,
-		"",
-		formHeader,
-		"",
-		dbTypeField,
-		"",
-		sqliteHeader,
-		pathField,
-		"",
-		postgresHeader,
-		hostField,
-		portField,
-		userField,
-		passwordField,
-		dbField,
-	}
-
-	if errorSection != "" {
-		content = append(content, "", errorSection)
-	}
-
 	content = append(content, "", help)
 
 	return lipgloss.JoinVertical(lipgloss.Left, content...)
@@ -302,22 +315,42 @@ func (m *ConnectModel) renderField(label, value string, index int) string {
 	)
 }
 
-// nextField moves focus to the next field
+// getMaxFieldIndex returns the maximum field index based on current DB type
+func (m *ConnectModel) getMaxFieldIndex() int {
+	dbType := m.dbTypeInput.Value()
+	if dbType == "" {
+		dbType = "sqlite"
+	}
+	if dbType == "sqlite" || dbType == "SQLite" {
+		return 1 // dbType (0) and path (1)
+	}
+	return 6 // All PostgreSQL fields
+}
+
+// isFieldVisible returns true if the field should be shown for current DB type
+func (m *ConnectModel) isFieldVisible(index int) bool {
+	maxIndex := m.getMaxFieldIndex()
+	return index <= maxIndex
+}
+
+// nextField moves focus to the next visible field
 func (m *ConnectModel) nextField() {
 	m.blurCurrentField()
+	maxIndex := m.getMaxFieldIndex()
 	m.focusIndex++
-	if m.focusIndex > 6 {
+	if m.focusIndex > maxIndex {
 		m.focusIndex = 0
 	}
 	m.focusCurrentField()
 }
 
-// prevField moves focus to the previous field
+// prevField moves focus to the previous visible field
 func (m *ConnectModel) prevField() {
 	m.blurCurrentField()
+	maxIndex := m.getMaxFieldIndex()
 	m.focusIndex--
 	if m.focusIndex < 0 {
-		m.focusIndex = 6
+		m.focusIndex = maxIndex
 	}
 	m.focusCurrentField()
 }
@@ -342,6 +375,17 @@ func (m *ConnectModel) blurCurrentField() {
 	}
 }
 
+// blurAllFields removes focus from all fields
+func (m *ConnectModel) blurAllFields() {
+	m.dbTypeInput.Blur()
+	m.pathInput.Blur()
+	m.hostInput.Blur()
+	m.portInput.Blur()
+	m.userInput.Blur()
+	m.passwordInput.Blur()
+	m.databaseInput.Blur()
+}
+
 // focusCurrentField sets focus on the current field
 func (m *ConnectModel) focusCurrentField() {
 	switch m.focusIndex {
@@ -364,8 +408,8 @@ func (m *ConnectModel) focusCurrentField() {
 
 // handleEnter handles the enter key press
 func (m *ConnectModel) handleEnter() (tea.Model, tea.Cmd) {
-	// If on last field, start connection
-	if m.focusIndex == 6 {
+	// If on last visible field, start connection
+	if m.focusIndex == m.getMaxFieldIndex() {
 		return m, m.startConnection()
 	}
 	// Otherwise, move to next field

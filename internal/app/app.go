@@ -149,6 +149,8 @@ func (a *App) getActiveScreen() tea.Model {
 	switch a.currentScreen {
 	case ScreenConnect:
 		return a.connectScreen
+	case ScreenBrowser:
+		return a.browserScreen
 	case ScreenQuery:
 		return a.queryScreen
 	case ScreenDashboard:
