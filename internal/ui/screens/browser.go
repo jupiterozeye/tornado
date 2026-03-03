@@ -43,6 +43,7 @@ import (
 type Pane int
 
 const (
+	PaneNone     Pane = -1
 	PaneExplorer Pane = iota
 	PaneQuery
 	PaneResults
@@ -69,14 +70,15 @@ type BrowserModel struct {
 	results  table.Model
 
 	// State
-	width        int
-	height       int
-	focusedPane  Pane
-	queryMode    QueryMode
-	styles       *styles.Styles
-	showExplorer bool
-	leaderActive bool
-	statusMsg    string
+	width         int
+	height        int
+	focusedPane   Pane
+	queryMode     QueryMode
+	styles        *styles.Styles
+	showExplorer  bool
+	leaderActive  bool
+	statusMsg     string
+	maximizedPane Pane
 
 	// Query results
 	currentResults *models.QueryResult
@@ -117,6 +119,7 @@ func NewBrowserModel(database db.Database) *BrowserModel {
 		queryMode:     QueryModeNormal,
 		styles:        s,
 		showExplorer:  true,
+		maximizedPane: PaneNone,
 	}
 }
 
@@ -213,9 +216,7 @@ func (m *BrowserModel) View() string {
 		return "Loading..."
 	}
 
-	_, _, ew, eh := m.layoutManager.GetExplorerBounds()
-	_, _, qw, qh := m.layoutManager.GetQueryBounds()
-	_, _, rw, rh := m.layoutManager.GetResultsBounds()
+	ew, eh, qw, qh, rw, rh := m.paneDimensions()
 
 	// Render explorer
 	var explorerContent string
@@ -250,6 +251,17 @@ func (m *BrowserModel) View() string {
 	main := rightSide
 	if m.showExplorer {
 		main = lipgloss.JoinHorizontal(lipgloss.Top, explorerPane, rightSide)
+	}
+
+	if m.maximizedPane != PaneNone {
+		switch m.maximizedPane {
+		case PaneExplorer:
+			main = m.renderPane("Explorer", "e", explorerContent, m.width, m.mainHeight(), m.focusedPane == PaneExplorer)
+		case PaneQuery:
+			main = m.renderPane(queryTitle, "q", m.query.View(), m.width, m.mainHeight(), m.focusedPane == PaneQuery)
+		case PaneResults:
+			main = m.renderPane("Results", "r", resultsContent, m.width, m.mainHeight(), m.focusedPane == PaneResults)
+		}
 	}
 
 	if m.leaderActive {
@@ -336,6 +348,31 @@ func padToWidth(s string, width int) string {
 	return s + strings.Repeat(" ", width-w)
 }
 
+func (m *BrowserModel) mainHeight() int {
+	h := m.height - 1
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+func (m *BrowserModel) paneDimensions() (ew, eh, qw, qh, rw, rh int) {
+	mainH := m.mainHeight()
+	if !m.showExplorer {
+		ew, eh = 0, 0
+		qw = m.width
+		rw = m.width
+		qh = mainH / 2
+		rh = mainH - qh
+		return
+	}
+
+	_, _, ew, eh = m.layoutManager.GetExplorerBounds()
+	_, _, qw, qh = m.layoutManager.GetQueryBounds()
+	_, _, rw, rh = m.layoutManager.GetResultsBounds()
+	return
+}
+
 func (m *BrowserModel) renderContextFooter() string {
 	if m.leaderActive {
 		line := truncateToWidth("COMMANDS: e Explorer  f Maximize  c Connect  x Disconnect  t Theme  h Help  / Search  q Quit", m.width)
@@ -386,15 +423,33 @@ func (m *BrowserModel) explorerFooterText() string {
 }
 
 func (m *BrowserModel) handleLeaderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" {
+		m.leaderActive = false
+		m.statusMsg = ""
+		return m, nil
+	}
+
 	m.leaderActive = false
 	key := msg.String()
 	switch key {
 	case "e":
 		m.showExplorer = !m.showExplorer
+		if !m.showExplorer && m.focusedPane == PaneExplorer {
+			m.focusedPane = PaneQuery
+		}
+		m.maximizedPane = PaneNone
+		m.updateComponentSizes()
 		m.statusMsg = "Toggled explorer"
 		return m, nil
 	case "f":
-		m.statusMsg = "Maximize pane: not implemented yet"
+		if m.maximizedPane == m.focusedPane {
+			m.maximizedPane = PaneNone
+			m.statusMsg = "Restored split layout"
+		} else {
+			m.maximizedPane = m.focusedPane
+			m.statusMsg = "Maximized focused pane"
+		}
+		m.updateComponentSizes()
 		return m, nil
 	case "c":
 		return m, func() tea.Msg { return RequestConnectMsg{} }
@@ -465,7 +520,7 @@ func (m *BrowserModel) overlayLeaderMenu(base string) string {
 		Padding(1, 2).
 		Background(styles.BgDark).
 		Render(strings.Join([]string{
-			"Command Menu (<space>)",
+			"<space> Commands",
 			"",
 			"e  Toggle Explorer",
 			"f  Toggle Maximize",
@@ -476,10 +531,22 @@ func (m *BrowserModel) overlayLeaderMenu(base string) string {
 			"/  Telescope Search",
 			"q  Quit",
 			"",
-			"Esc/any other key closes",
+			"Close: <esc>",
 		}, "\n"))
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, base+"\n"+menu)
+	menuW := lipgloss.Width(menu)
+	x := (m.width-menuW)/2 + 1
+	if x < 1 {
+		x = 1
+	}
+	menuY := 2
+
+	lines := strings.Split(menu, "\n")
+	out := base
+	for i, line := range lines {
+		out += fmt.Sprintf("\x1b[%d;%dH%s", menuY+i, x, line)
+	}
+	return out
 }
 
 type RequestConnectMsg struct{}
@@ -533,21 +600,27 @@ func (m *BrowserModel) initExplorer() tea.Cmd {
 }
 
 func (m *BrowserModel) updateComponentSizes() {
+	ew, eh, qw, qh, rw, rh := m.paneDimensions()
+
 	// Update explorer size
-	if m.explorer != nil {
-		_, _, w, h := m.layoutManager.GetExplorerBounds()
-		m.explorer.SetSize(w, h)
+	if m.explorer != nil && m.showExplorer {
+		m.explorer.SetSize(ew, eh)
 	}
 
 	// Update query editor size
-	_, _, qw, qh := m.layoutManager.GetQueryBounds()
-	m.query.SetWidth(qw - 6)
-	m.query.SetHeight(qh - 6)
+	m.query.SetWidth(maxInt(10, qw-6))
+	m.query.SetHeight(maxInt(3, qh-6))
 
 	// Update results table size
-	_, _, rw, rh := m.layoutManager.GetResultsBounds()
-	m.results.SetWidth(rw - 6)
-	m.results.SetHeight(rh - 6)
+	m.results.SetWidth(maxInt(10, rw-6))
+	m.results.SetHeight(maxInt(3, rh-6))
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m *BrowserModel) updateFocus() {
