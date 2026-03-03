@@ -40,7 +40,6 @@
 package db
 
 import (
-
 	"github.com/jupiterozeye/tornado/internal/models"
 )
 
@@ -208,6 +207,38 @@ func (p *PostgresDB) ListSchemas() ([]string, error) {
 //
 // TODO: Implement DescribeTable method
 func (p *PostgresDB) DescribeTable(name string) (*models.TableSchema, error) {
+	// TODO: Implement
+	return nil, nil
+}
+
+// ListViews returns all views in the database.
+//
+// TODO: Implement ListViews method
+func (p *PostgresDB) ListViews() ([]string, error) {
+	// TODO: Implement
+	return nil, nil
+}
+
+// ListIndexes returns all indexes for a specific table.
+//
+// TODO: Implement ListIndexes method
+func (p *PostgresDB) ListIndexes(tableName string) ([]string, error) {
+	// TODO: Implement
+	return nil, nil
+}
+
+// ListTriggers returns all triggers in the database.
+//
+// TODO: Implement ListTriggers method
+func (p *PostgresDB) ListTriggers() ([]string, error) {
+	// TODO: Implement
+	return nil, nil
+}
+
+// ListSequences returns all sequences in the database.
+//
+// TODO: Implement ListSequences method
+func (p *PostgresDB) ListSequences() ([]string, error) {
 	// TODO: Implement
 	return nil, nil
 }

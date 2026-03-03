@@ -42,6 +42,19 @@ type Database interface {
 	// Includes column names, types, nullability, keys, etc.
 	DescribeTable(name string) (*models.TableSchema, error)
 
+	// ListViews returns a list of all views in the database.
+	ListViews() ([]string, error)
+
+	// ListIndexes returns a list of indexes for a specific table.
+	ListIndexes(tableName string) ([]string, error)
+
+	// ListTriggers returns a list of all triggers in the database.
+	ListTriggers() ([]string, error)
+
+	// ListSequences returns a list of all sequences in the database.
+	// (Primarily for PostgreSQL, returns empty for SQLite)
+	ListSequences() ([]string, error)
+
 	// GetType returns the database type (sqlite, postgres, etc.)
 	GetType() string
 }

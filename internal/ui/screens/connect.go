@@ -40,6 +40,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/jupiterozeye/tornado/internal/assets"
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/models"
 	"github.com/jupiterozeye/tornado/internal/ui/styles"
@@ -207,15 +208,16 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 //   - Error message (if any)
 //   - Help/keybindings
 func (m *ConnectModel) View() string {
-	// Title
-	title := m.styles.Title.Render("Tornado - Database Connection")
+	// Logo header
+	logoStyle := lipgloss.NewStyle().Foreground(styles.Primary)
+	logo := logoStyle.Render(assets.Logo)
 
 	// Show connecting message if connecting
 	if m.isConnecting {
 		connectingMsg := m.styles.Muted.Render("Connecting...")
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
-			title,
+			logo,
 			"",
 			connectingMsg,
 		)
@@ -257,7 +259,7 @@ func (m *ConnectModel) View() string {
 
 	// Combine all sections
 	content := []string{
-		title,
+		logo,
 		"",
 		formHeader,
 		"",

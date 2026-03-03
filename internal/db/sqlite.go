@@ -233,5 +233,96 @@ func (s *SQLiteDB) GetType() string {
 	return "sqlite"
 }
 
+// ListViews returns all views in the SQLite database.
+func (s *SQLiteDB) ListViews() ([]string, error) {
+	if !s.connected || s.db == nil {
+		return nil, fmt.Errorf("not connected to database")
+	}
+
+	rows, err := s.db.Query(`
+		SELECT name FROM sqlite_master
+		WHERE type='view' AND name NOT LIKE 'sqlite_%'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var views []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		views = append(views, name)
+	}
+
+	return views, rows.Err()
+}
+
+// ListIndexes returns all indexes for a specific table.
+func (s *SQLiteDB) ListIndexes(tableName string) ([]string, error) {
+	if !s.connected || s.db == nil {
+		return nil, fmt.Errorf("not connected to database")
+	}
+
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA index_list(%s)", tableName))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var indexes []string
+	for rows.Next() {
+		var seq int
+		var name string
+		var unique int
+		var origin string
+		var partial int
+
+		err := rows.Scan(&seq, &name, &unique, &origin, &partial)
+		if err != nil {
+			return nil, err
+		}
+		indexes = append(indexes, name)
+	}
+
+	return indexes, rows.Err()
+}
+
+// ListTriggers returns all triggers in the SQLite database.
+func (s *SQLiteDB) ListTriggers() ([]string, error) {
+	if !s.connected || s.db == nil {
+		return nil, fmt.Errorf("not connected to database")
+	}
+
+	rows, err := s.db.Query(`
+		SELECT name FROM sqlite_master
+		WHERE type='trigger' AND name NOT LIKE 'sqlite_%'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var triggers []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		triggers = append(triggers, name)
+	}
+
+	return triggers, rows.Err()
+}
+
+// ListSequences returns all sequences in the SQLite database.
+// For SQLite, this returns an empty slice as SQLite doesn't have a traditional sequence concept.
+func (s *SQLiteDB) ListSequences() ([]string, error) {
+	// SQLite uses AUTOINCREMENT, not sequences like PostgreSQL
+	return []string{}, nil
+}
+
 // Ensure SQLiteDB implements Database interface at compile time.
 var _ Database = (*SQLiteDB)(nil)
