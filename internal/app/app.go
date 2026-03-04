@@ -21,10 +21,6 @@ const (
 	ScreenConnect Screen = iota
 	// ScreenBrowser is for browsing tables and schemas
 	ScreenBrowser
-	// ScreenQuery is the SQL query editor and results viewer
-	ScreenQuery
-	// ScreenDashboard shows traffic metrics and charts
-	ScreenDashboard
 )
 
 // String returns a human-readable name for the screen.
@@ -34,10 +30,6 @@ func (s Screen) String() string {
 		return "Connect"
 	case ScreenBrowser:
 		return "Browser"
-	case ScreenQuery:
-		return "Query"
-	case ScreenDashboard:
-		return "Dashboard"
 	default:
 		return "Unknown"
 	}
@@ -54,10 +46,8 @@ type App struct {
 	err           error
 
 	// Screen models - each is a separate Bubble Tea model
-	connectScreen   *screens.ConnectModel
-	browserScreen   *screens.BrowserModel
-	queryScreen     *screens.QueryModel
-	dashboardScreen *screens.DashboardModel
+	connectScreen *screens.ConnectModel
+	browserScreen *screens.BrowserModel
 }
 
 // New creates a new App instance with default values.
@@ -81,9 +71,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return a, tea.Quit
-		case "tab":
-			a.switchToNextScreen()
-			return a, nil
 		default:
 			// Pass all other keys to the active screen
 			return a.delegateToActiveScreen(msg)
@@ -96,11 +83,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.delegateToActiveScreen(msg)
 
 	case screens.ConnectSuccessMsg:
-		// Initialize other screens now that we have DB
+		// Initialize browser screen now that we have DB
 		a.db = msg.DB
 		a.browserScreen = screens.NewBrowserModel(a.db)
-		a.queryScreen = screens.NewQueryModel(a.db)
-		a.dashboardScreen = screens.NewDashboardModel(a.db)
 
 		// Ensure the browser gets current dimensions immediately.
 		// Without this it can stay in a "Loading..." state waiting for a resize.
@@ -148,30 +133,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // Helper methods
 
-func (a *App) switchToNextScreen() {
-	switch a.currentScreen {
-	case ScreenConnect:
-		// Cant switch from connect until connected
-		return
-	case ScreenBrowser:
-		a.currentScreen = ScreenQuery
-	case ScreenQuery:
-		a.currentScreen = ScreenDashboard
-	case ScreenDashboard:
-		a.currentScreen = ScreenBrowser
-	}
-}
-
 func (a *App) getActiveScreen() tea.Model {
 	switch a.currentScreen {
 	case ScreenConnect:
 		return a.connectScreen
 	case ScreenBrowser:
 		return a.browserScreen
-	case ScreenQuery:
-		return a.queryScreen
-	case ScreenDashboard:
-		return a.dashboardScreen
 	default:
 		return a.connectScreen
 	}
@@ -188,17 +155,9 @@ func (a *App) delegateToActiveScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ScreenBrowser:
 		newModel, cmd = a.browserScreen.Update(msg)
 		a.browserScreen = newModel.(*screens.BrowserModel)
-	case ScreenQuery:
-		newModel, cmd = a.queryScreen.Update(msg)
-		a.queryScreen = newModel.(*screens.QueryModel)
-	case ScreenDashboard:
-		newModel, cmd = a.dashboardScreen.Update(msg)
-		a.dashboardScreen = newModel.(*screens.DashboardModel)
-
 	}
 
 	return a, cmd
-
 }
 
 // View renders the current state of the application.
