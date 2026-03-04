@@ -129,6 +129,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.db = nil
 		}
 		a.connectScreen = screens.NewConnectModel()
+		// Pass current window size to the new connect screen
+		if a.width > 0 && a.height > 0 {
+			a.connectScreen.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
+		}
 		a.currentScreen = ScreenConnect
 		return a, a.connectScreen.Init()
 

@@ -2,11 +2,6 @@
 //
 // This file defines structures for managing database connections,
 // including configuration parameters and connection state tracking.
-//
-// TODO: Define all connection-related structures:
-//   - [ ] ConnectionConfig for storing connection parameters
-//   - [ ] ConnectionState for tracking active connections
-//   - [ ] ConnectionHistory for recent connections list
 package models
 
 import (
@@ -15,13 +10,6 @@ import (
 
 // ConnectionConfig holds all parameters needed to connect to a database.
 // Different database types use different subsets of these fields.
-//
-// Key Learning - Configuration Structures:
-//   - Group related configuration into a struct
-//   - Makes passing configuration easier (one arg vs many)
-//   - Can be serialized to/from files (JSON, YAML)
-//
-// TODO: Complete this structure with all necessary fields
 type ConnectionConfig struct {
 	// Type specifies the database type: "sqlite" or "postgres"
 	Type string
@@ -30,12 +18,12 @@ type ConnectionConfig struct {
 	// Displayed in the connection list and title bar
 	Name string
 
-	// ===== SQLite-specific fields =====
+	// SQLite-specific fields
 
 	// Path is the file path for SQLite databases
 	Path string
 
-	// ===== PostgreSQL-specific fields =====
+	// PostgreSQL-specific fields
 
 	// Host is the PostgreSQL server hostname
 	Host string
@@ -61,7 +49,7 @@ type ConnectionConfig struct {
 	// Schema is the default schema to use (PostgreSQL)
 	Schema string
 
-	// ===== Connection options =====
+	// Connection options
 
 	// Timeout is the connection timeout duration
 	Timeout time.Duration
@@ -74,12 +62,6 @@ type ConnectionConfig struct {
 }
 
 // IsValid performs basic validation on the connection config.
-//
-// TODO: Implement validation logic
-//   - Check that Type is valid (sqlite or postgres)
-//   - For sqlite: Path must be set
-//   - For postgres: Host, User, Database must be set
-//   - Port should be valid (1-65535)
 func (c *ConnectionConfig) IsValid() bool {
 	// TODO: Implement validation
 	return c.Type != ""
@@ -87,8 +69,6 @@ func (c *ConnectionConfig) IsValid() bool {
 
 // ConnectionString returns a display-safe connection string.
 // Passwords are masked for security.
-//
-// TODO: Implement this for displaying in the UI
 func (c *ConnectionConfig) ConnectionString() string {
 	// TODO: Implement based on database type
 	// For SQLite: just show the path
@@ -97,8 +77,6 @@ func (c *ConnectionConfig) ConnectionString() string {
 }
 
 // ConnectionState tracks the current state of a database connection.
-//
-// TODO: Define state tracking fields
 type ConnectionState struct {
 	// Connected indicates if currently connected
 	Connected bool
@@ -121,7 +99,6 @@ type ConnectionState struct {
 
 // ConnectionHistoryItem represents a saved/recent connection.
 // Used for the connection screen's "recent connections" list.
-//
 // TODO: Implement connection history persistence
 type ConnectionHistoryItem struct {
 	// Config is the connection configuration
