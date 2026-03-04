@@ -89,6 +89,8 @@ func (s *SQLiteDB) IsConnected() bool {
 
 // Query executes a SELECT query and returns results.
 func (s *SQLiteDB) Query(sql string) (*models.QueryResult, error) {
+	start := time.Now()
+
 	// Execute query
 	rows, err := s.db.Query(sql)
 	if err != nil {
@@ -129,11 +131,12 @@ func (s *SQLiteDB) Query(sql string) (*models.QueryResult, error) {
 
 	}
 	return &models.QueryResult{
-		Columns:     columns,
-		ColumnTypes: typeNames,
-		Rows:        results,
-		RowCount:    len(results),
-		Query:       sql,
+		Columns:       columns,
+		ColumnTypes:   typeNames,
+		Rows:          results,
+		RowCount:      len(results),
+		ExecutionTime: time.Since(start),
+		Query:         sql,
 	}, nil
 }
 

@@ -29,6 +29,7 @@ import (
 	"image/color"
 	"regexp"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/table"
@@ -97,8 +98,15 @@ type BrowserModel struct {
 	maximizedPane Pane
 
 	// Query results
-	currentResults *models.QueryResult
-	queryError     string
+	currentResults   *models.QueryResult
+	filteredResults  *models.QueryResult // For filtered view
+	queryError       string
+	resultsFilter    string // Fuzzy filter text
+	resultsCursorCol int    // Selected column in results table
+	showPreview      bool   // Preview popup visible
+	previewContent   string // Content to preview
+	previewTitle     string // Title for preview popup
+	showCopyMenu     bool   // Copy menu popup visible
 
 	// Autocomplete
 	autocomplete *AutocompleteModel
@@ -258,8 +266,22 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateComponentSizes()
 
 	case tea.KeyPressMsg:
+		// Handle preview dialog first
+		if m.showPreview {
+			if msg.String() == "esc" || msg.String() == "q" {
+				m.showPreview = false
+				m.statusMsg = ""
+				return m, nil
+			}
+			return m, nil
+		}
+
 		if m.themeMenu {
 			return m.handleThemeMenuKey(msg)
+		}
+
+		if m.showCopyMenu {
+			return m.handleCopyMenuKey(msg)
 		}
 
 		if m.leaderActive {
@@ -348,6 +370,7 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.queryError = ""
 			m.currentResults = msg.Result
+			m.resultsCursorCol = 0 // Reset column cursor for new results
 			m.updateResultsTable()
 		}
 		m.focusedPane = PaneResults
@@ -468,6 +491,12 @@ func (m *BrowserModel) View() tea.View {
 	if m.autocomplete.Visible {
 		view.Content = m.renderWithAutocomplete(base)
 	}
+	if m.showPreview {
+		view.Content = m.renderWithPreview(base)
+	}
+	if m.showCopyMenu {
+		view.Content = m.renderWithCopyMenu(base)
+	}
 
 	return view
 }
@@ -508,9 +537,6 @@ func (m *BrowserModel) renderPane(title, key, content string, paneWidth, paneHei
 	top := makeTopBorder(label, innerWidth)
 	body := clipText(content, innerWidth, bodyHeight)
 	bodyLines := strings.Split(body, "\n")
-	for len(bodyLines) < bodyHeight {
-		bodyLines = append(bodyLines, "")
-	}
 
 	borderColor := styles.Border
 	if focused {
@@ -522,6 +548,11 @@ func (m *BrowserModel) renderPane(title, key, content string, paneWidth, paneHei
 	bodyStyle := lipgloss.NewStyle().
 		Background(bodyBg).
 		Width(innerWidth)
+
+	// Pad lines with proper background - render empty lines with background
+	for len(bodyLines) < bodyHeight {
+		bodyLines = append(bodyLines, bodyStyle.Render(strings.Repeat(" ", innerWidth)))
+	}
 
 	var out []string
 	out = append(out, borderStyle.Render("╭"+top+"╮"))
@@ -602,7 +633,25 @@ func (m *BrowserModel) renderContextFooter() string {
 			text = "Query NORMAL: i Insert  a Append  v Visual  V Visual Line  Enter Execute"
 		}
 	case PaneResults:
-		text = "Results: j/k Move  q Query  e Explorer  Space Commands"
+		if m.resultsFilter != "" {
+			text = fmt.Sprintf("Filter: '%s' | Esc to clear", m.resultsFilter)
+		} else if m.showPreview {
+			text = "Preview: Esc or q to close"
+		} else if m.showCopyMenu {
+			text = "Copy Menu: c Cell, y Row, a All, e Export, Esc Cancel"
+		} else {
+			// Show current column position
+			cols := m.results.Columns()
+			colName := ""
+			if m.resultsCursorCol >= 0 && m.resultsCursorCol < len(cols) {
+				colName = cols[m.resultsCursorCol].Title
+			}
+			if colName != "" {
+				text = fmt.Sprintf("Results: h/l Col(%s)  j/k Row  v Preview  d Delete  y Copy  / Filter  x Clear", colName)
+			} else {
+				text = "Results: h/l Col  j/k Row  v Preview  d Delete  y Copy  / Filter  x Clear"
+			}
+		}
 	}
 
 	line := truncateToWidth(text, m.width)
@@ -641,9 +690,134 @@ func (m *BrowserModel) handleLeaderKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		return m, nil
 	}
 
+	// Check if we're in copy mode from Results pane
+	if m.statusMsg == "COPY: c Cell, y Row, a All" {
+		return m.handleCopyCommand(msg.String())
+	}
+
 	// Dismiss menu and execute the command
 	m.leaderActive = false
 	return m.executeLeaderCommand(msg.String())
+}
+
+// handleCopyCommand handles copy menu options
+func (m *BrowserModel) handleCopyCommand(key string) (tea.Model, tea.Cmd) {
+	m.leaderActive = false
+
+	switch key {
+	case "c":
+		// Copy cell
+		return m.copyCell()
+	case "y":
+		// Copy row
+		return m.copyRow()
+	case "a":
+		// Copy all
+		return m.copyAll()
+	case "e":
+		// Export placeholder
+		m.statusMsg = "Export: not implemented yet"
+		return m, nil
+	default:
+		m.statusMsg = ""
+		return m, nil
+	}
+}
+
+// copyCell copies the currently selected cell to clipboard
+func (m *BrowserModel) copyCell() (tea.Model, tea.Cmd) {
+	row := m.results.SelectedRow()
+	if row == nil || m.currentResults == nil {
+		m.statusMsg = "No cell selected"
+		return m, nil
+	}
+
+	// Use the tracked column index
+	colIdx := m.resultsCursorCol
+	if colIdx >= len(row) {
+		colIdx = 0
+	}
+
+	value := fmt.Sprintf("%v", row[colIdx])
+	// Store in yank buffer and print to terminal (OSC52 not available in bubbletea v2)
+	m.yankBuffer = value
+	displayValue := value
+	if len(displayValue) > 30 {
+		displayValue = displayValue[:27] + "..."
+	}
+	m.statusMsg = fmt.Sprintf("Copied cell: %s", displayValue)
+	return m, nil
+}
+
+// copyRow copies the currently selected row to clipboard
+func (m *BrowserModel) copyRow() (tea.Model, tea.Cmd) {
+	row := m.results.SelectedRow()
+	if row == nil {
+		m.statusMsg = "No row selected"
+		return m, nil
+	}
+
+	var values []string
+	for _, cell := range row {
+		values = append(values, fmt.Sprintf("%v", cell))
+	}
+	value := strings.Join(values, "\t")
+	m.yankBuffer = value
+	m.statusMsg = "Copied row to buffer"
+	return m, nil
+}
+
+// copyAll copies all results to clipboard
+func (m *BrowserModel) copyAll() (tea.Model, tea.Cmd) {
+	if m.currentResults == nil {
+		m.statusMsg = "No results to copy"
+		return m, nil
+	}
+
+	var lines []string
+
+	// Add header
+	lines = append(lines, strings.Join(m.currentResults.Columns, "\t"))
+
+	// Add rows
+	for _, row := range m.currentResults.Rows {
+		var values []string
+		for _, cell := range row {
+			values = append(values, fmt.Sprintf("%v", cell))
+		}
+		lines = append(lines, strings.Join(values, "\t"))
+	}
+
+	value := strings.Join(lines, "\n")
+	m.yankBuffer = value
+	m.statusMsg = fmt.Sprintf("Copied %d rows to buffer", len(m.currentResults.Rows))
+	return m, nil
+}
+
+// handleCopyMenuKey handles key presses in the copy menu
+func (m *BrowserModel) handleCopyMenuKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" {
+		m.showCopyMenu = false
+		m.statusMsg = ""
+		return m, nil
+	}
+
+	m.showCopyMenu = false
+
+	switch msg.String() {
+	case "c":
+		return m.copyCell()
+	case "y":
+		return m.copyRow()
+	case "a":
+		return m.copyAll()
+	case "e":
+		m.statusMsg = "Export: not implemented yet"
+		return m, nil
+	default:
+		m.statusMsg = ""
+		return m, nil
+	}
 }
 
 // executeLeaderCommand runs a leader command by key. Used both during
@@ -842,23 +1016,64 @@ func (m *BrowserModel) renderWithAutocomplete(base string) string {
 	return comp.Render()
 }
 
+// renderWithCopyMenu overlays the copy menu in the bottom right (like leader menu)
+func (m *BrowserModel) renderWithCopyMenu(base string) string {
+	bg := styles.BgDark
+	keyStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Background(bg)
+	textStyle := lipgloss.NewStyle().Background(bg).Foreground(styles.Text)
+
+	// Ensure all menu items have proper background - wrap entire line in textStyle
+	menuContent := []string{
+		textStyle.Render("  " + keyStyle.Render("c") + textStyle.Render("  Copy Cell")),
+		textStyle.Render("  " + keyStyle.Render("y") + textStyle.Render("  Copy Row")),
+		textStyle.Render("  " + keyStyle.Render("a") + textStyle.Render("  Copy All")),
+		textStyle.Render(""),
+		textStyle.Render("  " + keyStyle.Render("e") + textStyle.Render("  Export...")),
+		textStyle.Render(""),
+		textStyle.Render("  " + keyStyle.Render("esc") + textStyle.Render(" Cancel")),
+	}
+
+	menu := renderStyledBox("Copy", menuContent, "", 30)
+
+	// Position in bottom right (same as leader menu)
+	boxH := len(strings.Split(menu, "\n"))
+	boxW := 30
+	x := m.width - boxW - 2
+	y := m.height - boxH - 1
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+
+	baseLayer := lipgloss.NewLayer(base)
+	menuLayer := lipgloss.NewLayer(menu).X(x).Y(y).Z(1)
+
+	comp := lipgloss.NewCompositor(baseLayer, menuLayer)
+	return comp.Render()
+}
+
 func buildLeaderMenuLines() []string {
-	keyStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-	headStyle := lipgloss.NewStyle().Foreground(styles.Secondary).Bold(true)
+	bg := styles.BgDark
+	keyStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Background(bg)
+	headStyle := lipgloss.NewStyle().Foreground(styles.Secondary).Bold(true).Background(bg)
+	textStyle := lipgloss.NewStyle().Background(bg).Foreground(styles.Text)
+
 	return []string{
 		headStyle.Render("Navigation"),
-		"  " + keyStyle.Render("e") + "  Toggle Explorer",
-		"  " + keyStyle.Render("f") + "  Toggle Maximize",
-		"",
+		textStyle.Render("  " + keyStyle.Render("e") + textStyle.Render("  Toggle Explorer")),
+		textStyle.Render("  " + keyStyle.Render("f") + textStyle.Render("  Toggle Maximize")),
+		textStyle.Render(""),
 		headStyle.Render("Connection"),
-		"  " + keyStyle.Render("c") + "  Connect",
-		"  " + keyStyle.Render("x") + "  Disconnect",
-		"",
+		textStyle.Render("  " + keyStyle.Render("c") + textStyle.Render("  Connect")),
+		textStyle.Render("  " + keyStyle.Render("x") + textStyle.Render("  Disconnect")),
+		textStyle.Render(""),
 		headStyle.Render("Other"),
-		"  " + keyStyle.Render("t") + "  Change Theme",
-		"  " + keyStyle.Render("h") + "  Help",
-		"  " + keyStyle.Render("/") + "  Search",
-		"  " + keyStyle.Render("q") + "  Quit",
+		textStyle.Render("  " + keyStyle.Render("t") + textStyle.Render("  Change Theme")),
+		textStyle.Render("  " + keyStyle.Render("h") + textStyle.Render("  Help")),
+		textStyle.Render("  " + keyStyle.Render("/") + textStyle.Render("  Search")),
+		textStyle.Render("  " + keyStyle.Render("q") + textStyle.Render("  Quit")),
 	}
 }
 
@@ -874,19 +1089,24 @@ func renderStyledBox(title string, body []string, subtitle string, width int) st
 	}
 
 	innerWidth := width - 2
+	bg := styles.BgDark
 	borderStyle := lipgloss.NewStyle().
 		Foreground(styles.BorderFocus).
-		Background(styles.BgDark)
+		Background(bg)
 	bodyStyle := lipgloss.NewStyle().
-		Background(styles.BgDark).
+		Background(bg).
+		Foreground(styles.Text).
 		Width(innerWidth)
 
 	out := make([]string, 0, len(body)+2)
 	out = append(out, borderStyle.Render("╭"+makeMenuTopBorder(title, innerWidth)+"╮"))
 
 	for _, line := range body {
+		// Ensure each line has proper background by wrapping styled content
 		line = truncateToWidth(line, innerWidth)
-		out = append(out, borderStyle.Render("│")+bodyStyle.Render(line)+borderStyle.Render("│"))
+		// Re-render the line with background to ensure no terminal bleed
+		lineWithBg := lipgloss.NewStyle().Background(bg).Render(line)
+		out = append(out, borderStyle.Render("│")+bodyStyle.Render(lineWithBg)+borderStyle.Render("│"))
 	}
 
 	out = append(out, borderStyle.Render("╰"+makeMenuBottomBorder(subtitle, innerWidth)+"╯"))
@@ -918,6 +1138,62 @@ func makeMenuBottomBorder(label string, width int) string {
 	}
 	left := strings.Repeat("─", width-lipgloss.Width(segment))
 	return left + segment
+}
+
+// renderWithPreview overlays the preview dialog
+func (m *BrowserModel) renderWithPreview(base string) string {
+	if !m.showPreview {
+		return base
+	}
+
+	// Format content with word wrapping
+	boxWidth := minInt(60, m.width-10)
+	contentLines := wrapText(m.previewContent, boxWidth-4)
+
+	preview := renderDialogBox(m.previewTitle, contentLines, "esc Close", boxWidth)
+
+	// Center position
+	boxH := len(strings.Split(preview, "\n"))
+	boxW := boxWidth
+	x := (m.width - boxW) / 2
+	y := (m.height - boxH) / 2
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+
+	baseLayer := lipgloss.NewLayer(base)
+	previewLayer := lipgloss.NewLayer(preview).X(x).Y(y).Z(1)
+
+	comp := lipgloss.NewCompositor(baseLayer, previewLayer)
+	return comp.Render()
+}
+
+// wrapText wraps text to fit within maxWidth
+func wrapText(text string, maxWidth int) []string {
+	if maxWidth < 1 {
+		return []string{text}
+	}
+
+	var lines []string
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+
+	currentLine := words[0]
+	for _, word := range words[1:] {
+		if lipgloss.Width(currentLine+" "+word) <= maxWidth {
+			currentLine += " " + word
+		} else {
+			lines = append(lines, currentLine)
+			currentLine = word
+		}
+	}
+	lines = append(lines, currentLine)
+	return lines
 }
 
 type RequestConnectMsg struct{}
@@ -1022,9 +1298,7 @@ func (m *BrowserModel) routeKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case PaneQuery:
 		return m.handleQueryKey(msg)
 	case PaneResults:
-		var cmd tea.Cmd
-		m.results, cmd = m.results.Update(msg)
-		return m, cmd
+		return m.handleResultsKey(msg)
 	}
 	return m, nil
 }
@@ -1294,6 +1568,269 @@ func minInt(a, b int) int {
 	return b
 }
 
+// handleResultsKey handles keys when Results pane is focused
+func (m *BrowserModel) handleResultsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "v":
+		// Preview: show selected cell value
+		return m.showPreviewDialog()
+	case "d":
+		// Delete: create DELETE SQL query
+		return m.createDeleteQuery()
+	case "y":
+		// Copy: open copy menu
+		m.showCopyMenu = true
+		m.statusMsg = "COPY: c Cell, y Row, a All, e Export, esc Cancel"
+		return m, nil
+	case "h", "left":
+		// Move left (previous column)
+		if m.resultsCursorCol > 0 {
+			m.resultsCursorCol--
+		}
+		return m, nil
+	case "l", "right":
+		// Move right (next column)
+		cols := m.results.Columns()
+		if m.resultsCursorCol < len(cols)-1 {
+			m.resultsCursorCol++
+		}
+		return m, nil
+	case "x":
+		// Clear: clear results
+		m.clearResults()
+		return m, nil
+	case "/":
+		// Filter: start fuzzy filtering
+		m.resultsFilter = ""
+		m.statusMsg = "Filter: type to search, esc to clear"
+		return m, nil
+	case "esc":
+		if m.resultsFilter != "" {
+			m.resultsFilter = ""
+			m.applyFilter()
+			m.statusMsg = ""
+			return m, nil
+		}
+		// Navigation keys
+	case "j", "down":
+		m.results.MoveDown(1)
+		return m, nil
+	case "k", "up":
+		m.results.MoveUp(1)
+		return m, nil
+	case "g", "home":
+		m.results.GotoTop()
+		return m, nil
+	case "G", "end":
+		m.results.GotoBottom()
+		return m, nil
+	case "ctrl+d", "pgdown":
+		m.results.MoveDown(10)
+		return m, nil
+	case "ctrl+u", "pgup":
+		m.results.MoveUp(10)
+		return m, nil
+	default:
+		// Handle filter input
+		if m.statusMsg == "Filter: type to search, esc to clear" {
+			if msg.String() == "backspace" && len(m.resultsFilter) > 0 {
+				m.resultsFilter = m.resultsFilter[:len(m.resultsFilter)-1]
+			} else if len(msg.String()) == 1 {
+				m.resultsFilter += msg.String()
+			}
+			m.applyFilter()
+			return m, nil
+		}
+		// Pass other keys to table for default navigation
+		var cmd tea.Cmd
+		m.results, cmd = m.results.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+// showPreviewDialog shows a preview of the selected cell value
+func (m *BrowserModel) showPreviewDialog() (tea.Model, tea.Cmd) {
+	row := m.results.SelectedRow()
+	if row == nil || m.currentResults == nil {
+		return m, nil
+	}
+
+	cursor := m.results.Cursor()
+	if cursor < 0 || cursor >= len(m.currentResults.Rows) {
+		return m, nil
+	}
+
+	// Use the tracked column index
+	colIdx := m.resultsCursorCol
+	if colIdx >= len(row) {
+		colIdx = 0
+	}
+
+	value := fmt.Sprintf("%v", row[colIdx])
+	colName := ""
+	cols := m.results.Columns()
+	if colIdx < len(cols) {
+		colName = cols[colIdx].Title
+	}
+
+	m.showPreview = true
+	m.previewTitle = fmt.Sprintf("Preview: %s", colName)
+	m.previewContent = value
+	m.statusMsg = "Preview: esc to close"
+
+	return m, nil
+}
+
+// createDeleteQuery creates a DELETE SQL query for the selected row
+func (m *BrowserModel) createDeleteQuery() (tea.Model, tea.Cmd) {
+	if m.currentResults == nil || m.db == nil {
+		return m, nil
+	}
+
+	// Get selected row
+	rowIdx := m.results.Cursor()
+	if rowIdx < 0 || rowIdx >= len(m.currentResults.Rows) {
+		return m, nil
+	}
+
+	row := m.currentResults.Rows[rowIdx]
+	columns := m.currentResults.Columns
+
+	// Try to extract table name from the query
+	tableName := m.extractTableNameFromQuery(m.currentResults.Query)
+	if tableName == "" {
+		m.statusMsg = "Cannot determine table name from query"
+		return m, nil
+	}
+
+	// Build WHERE clause
+	var conditions []string
+	for i, col := range columns {
+		if i >= len(row) {
+			continue
+		}
+		val := row[i]
+		if val == nil {
+			conditions = append(conditions, fmt.Sprintf("%s IS NULL", col))
+		} else {
+			switch v := val.(type) {
+			case string:
+				conditions = append(conditions, fmt.Sprintf("%s = '%s'", col, v))
+			default:
+				conditions = append(conditions, fmt.Sprintf("%s = %v", col, v))
+			}
+		}
+	}
+
+	if len(conditions) == 0 {
+		m.statusMsg = "Cannot create DELETE: no columns found"
+		return m, nil
+	}
+
+	whereClause := strings.Join(conditions, " AND ")
+	deleteQuery := fmt.Sprintf("DELETE FROM %s WHERE %s;", tableName, whereClause)
+
+	// Set the query in the query editor
+	m.query.SetValue(deleteQuery)
+	m.focusedPane = PaneQuery
+	m.updateFocus()
+	m.statusMsg = "DELETE query created - review and execute"
+
+	return m, nil
+}
+
+// extractTableNameFromQuery attempts to extract the table name from a SELECT query
+func (m *BrowserModel) extractTableNameFromQuery(query string) string {
+	// Simple regex to extract table name from SELECT ... FROM table_name
+	query = strings.ToUpper(query)
+	fromIdx := strings.Index(query, "FROM ")
+	if fromIdx == -1 {
+		return ""
+	}
+
+	// Get everything after FROM
+	afterFrom := query[fromIdx+5:]
+	// Split on whitespace or punctuation to get just the table name
+	parts := strings.FieldsFunc(afterFrom, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == ',' || r == ';' || r == '(' || r == ')'
+	})
+
+	if len(parts) > 0 {
+		return strings.ToLower(parts[0])
+	}
+	return ""
+}
+
+// clearResults clears the results section
+func (m *BrowserModel) clearResults() {
+	m.currentResults = nil
+	m.filteredResults = nil
+	m.resultsFilter = ""
+	m.resultsCursorCol = 0
+	m.results.SetRows([]table.Row{})
+	m.results.SetColumns([]table.Column{})
+	m.statusMsg = "Results cleared"
+}
+
+// applyFilter applies fuzzy filter to results
+func (m *BrowserModel) applyFilter() {
+	if m.currentResults == nil {
+		return
+	}
+
+	if m.resultsFilter == "" {
+		// Reset to original results
+		m.updateResultsTable()
+		return
+	}
+
+	filter := strings.ToLower(m.resultsFilter)
+	var filteredRows [][]any
+
+	for _, row := range m.currentResults.Rows {
+		// Check if any cell contains the filter text
+		for _, cell := range row {
+			cellStr := strings.ToLower(fmt.Sprintf("%v", cell))
+			if strings.Contains(cellStr, filter) {
+				filteredRows = append(filteredRows, row)
+				break
+			}
+		}
+	}
+
+	// Build filtered result
+	if m.filteredResults == nil {
+		m.filteredResults = &models.QueryResult{}
+		*m.filteredResults = *m.currentResults
+	}
+	m.filteredResults.Rows = filteredRows
+	m.filteredResults.RowCount = len(filteredRows)
+
+	// Update table with filtered rows
+	rows := make([]table.Row, len(filteredRows))
+	for i, row := range filteredRows {
+		rowData := make([]string, len(row))
+		for j, val := range row {
+			if val == nil {
+				rowData[j] = "NULL"
+			} else {
+				switch v := val.(type) {
+				case string:
+					rowData[j] = v
+				case []byte:
+					rowData[j] = string(v)
+				default:
+					rowData[j] = fmt.Sprintf("%v", val)
+				}
+			}
+		}
+		rows[i] = rowData
+	}
+
+	m.results.SetRows(rows)
+}
+
 // normalizeBackground strips background color ANSI codes from text
 // to prevent terminal color bleeding while preserving foreground colors
 func normalizeBackground(text string, bg color.Color) string {
@@ -1355,6 +1892,9 @@ func (m *BrowserModel) executeQuery() tea.Cmd {
 		if cfg := config.Get(); cfg != nil {
 			go cfg.AddQuery(query)
 		}
+
+		startTime := time.Now()
+
 		// Try to determine if it's a query or exec
 		upperQuery := ""
 		for _, r := range query {
@@ -1377,6 +1917,9 @@ func (m *BrowserModel) executeQuery() tea.Cmd {
 
 		if isQuery {
 			result, err := m.db.Query(query)
+			if result != nil {
+				result.ExecutionTime = time.Since(startTime)
+			}
 			return QueryExecutedMsg{Result: result, Err: err}
 		} else {
 			_, err := m.db.Exec(query)
@@ -1386,9 +1929,10 @@ func (m *BrowserModel) executeQuery() tea.Cmd {
 			// For exec statements, return empty result
 			return QueryExecutedMsg{
 				Result: &models.QueryResult{
-					Columns:  []string{"Result"},
-					RowCount: 0,
-					Query:    query,
+					Columns:       []string{"Result"},
+					RowCount:      0,
+					ExecutionTime: time.Since(startTime),
+					Query:         query,
 				},
 			}
 		}
@@ -1440,24 +1984,46 @@ func (m *BrowserModel) updateResultsTable() {
 }
 
 func (m *BrowserModel) renderResults() string {
+	bg := styles.BgDefault
+	// Create a filler style that fills the available space
+	fillerStyle := lipgloss.NewStyle().Background(bg)
+
 	if m.queryError != "" {
-		return m.styles.Error.Render("Error: " + m.queryError)
+		errContent := fillerStyle.Render(lipgloss.NewStyle().Foreground(styles.Error).Render("Error: " + m.queryError))
+		return errContent
 	}
 
 	if m.currentResults == nil {
-		return m.styles.Muted.Render("Results will appear here...")
+		emptyContent := fillerStyle.Render(lipgloss.NewStyle().Foreground(styles.TextMuted).Render("Results will appear here..."))
+		return emptyContent
 	}
 
-	// Show result info
-	info := m.styles.Muted.Render(
-		fmt.Sprintf("Query returned %d rows", m.currentResults.RowCount),
-	)
+	// Show result info with execution time - fill entire width with background
+	var timeStr string
+	if m.currentResults.ExecutionTime < time.Millisecond {
+		timeStr = fmt.Sprintf("%d µs", m.currentResults.ExecutionTime.Microseconds())
+	} else {
+		timeStr = fmt.Sprintf("%d ms", m.currentResults.ExecutionTime.Milliseconds())
+	}
+	infoText := fmt.Sprintf("Query returned %d rows in %s", m.currentResults.RowCount, timeStr)
+	// Make info line fill width with proper background
+	info := lipgloss.NewStyle().
+		Background(bg).
+		Foreground(styles.TextMuted).
+		Width(m.width - 4).
+		Render(infoText)
 
-	return lipgloss.JoinVertical(
+	// Wrap table view in background style
+	tableView := lipgloss.NewStyle().Background(bg).Render(m.results.View())
+
+	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		info,
-		m.results.View(),
+		tableView,
 	)
+
+	// Ensure the entire content area has background color
+	return lipgloss.NewStyle().Background(bg).Render(content)
 }
 
 func applyTextAreaStyles(ta *textarea.Model) {
@@ -1491,9 +2057,14 @@ func applyTextAreaStyles(ta *textarea.Model) {
 }
 
 func applyTableStyles(t *table.Model) {
+	bg := styles.BgDefault
+	// Use a much more contrasting background for selected row
+	selectedBg := lipgloss.Color("240") // Lighter gray for visibility
+	selectedFg := lipgloss.Color("255") // White text
+
 	t.SetStyles(table.Styles{
-		Header:   styles.TableHeader().Background(styles.BgDefault),
-		Cell:     lipgloss.NewStyle().Padding(0, 1).Background(styles.BgDefault),
-		Selected: lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Background(styles.BgLight),
+		Header:   lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Background(bg).Padding(0, 1),
+		Cell:     lipgloss.NewStyle().Padding(0, 1).Background(bg).Foreground(styles.Text),
+		Selected: lipgloss.NewStyle().Foreground(selectedFg).Bold(true).Background(selectedBg).Padding(0, 1),
 	})
 }
