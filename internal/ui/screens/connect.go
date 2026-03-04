@@ -69,6 +69,7 @@ type ConnectModel struct {
 	spinner      spinner.Model
 	spinnerFrame int
 	animT        float64
+	roadOffset   float64
 }
 
 type connectAnimTickMsg time.Time
@@ -195,6 +196,7 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case connectAnimTickMsg:
 		m.animT += 0.06
+		m.roadOffset += 1.2
 		return m, connectAnimTick()
 
 	// Pass through connection messages so they bubble up to App
@@ -381,25 +383,481 @@ func (m *ConnectModel) renderTornadoAnimation() string {
 		return ""
 	}
 
-	var out []string
 	n := len(tornadoAnimLines)
+
+	// ── Style palette ─────────────────────────────────────────────
+	styleCache := make(map[string]lipgloss.Style)
+	stl := func(fg string) lipgloss.Style {
+		if s, ok := styleCache[fg]; ok {
+			return s
+		}
+		s := lipgloss.NewStyle().Foreground(lipgloss.Color(fg))
+		styleCache[fg] = s
+		return s
+	}
+
+	var (
+		roadFG       = "22"  // dark green grass
+		poleFG       = "94"  // brown wooden pole
+		debrisFG     = "241" // grey debris (matches tornado trail)
+		treeTrunkFG  = "94"  // brown tree trunk
+		treeLeafFG   = "28"  // green leaves
+		houseFG      = "94"  // brown houses
+		tornadoStyle = lipgloss.NewStyle().Foreground(styles.TextMuted)
+	)
+
+	// ── Background grid ───────────────────────────────────────────
+	type bgCell struct {
+		r  rune
+		fg string
+	}
+	bg := make([][]bgCell, n)
+	for i := range bg {
+		bg[i] = make([]bgCell, m.width)
+	}
+	set := func(row, col int, r rune, fg string) {
+		if row >= 0 && row < n && col >= 0 && col < m.width {
+			bg[row][col] = bgCell{r, fg}
+		}
+	}
+
+	const (
+		poleBaseSpacing = 60  // telephone poles (rare, irregular)
+		treeSpacing     = 75  // trees (rare)
+		houseSpacing    = 200 // houses (very rare)
+		destroyFull     = 5.0
+		destroyFar      = 14.0
+		shakeDist       = 22.0
+	)
+
+	roadTop := n - 1 // grass
+	poleTop := n - 6 // telephone poles start here and go down to road
+
+	// ── Tornado ground contact X ──────────────────────────────────
+	lastI := n - 1
+	lastF := math.Pow(float64(lastI)/float64(maxConnectInt(1, n-1)), 1.2)
+	lastAmp := 5.0*(1.0-lastF) + 2.0*lastF
+	lastPhase := m.animT*3.1 + float64(lastI)*0.55
+	lastSway := int(math.Sin(lastPhase) * lastAmp)
+
+	ll := tornadoAnimLines[lastI]
+	llW := lipgloss.Width(ll)
+	llRunes := []rune(ll)
+	firstNS, lastNS := -1, -1
+	for idx, r := range llRunes {
+		if r != ' ' {
+			if firstNS < 0 {
+				firstNS = idx
+			}
+			lastNS = idx
+		}
+	}
+	if firstNS < 0 {
+		firstNS, lastNS = 0, 0
+	}
+	artGroundCenter := (firstNS + lastNS) / 2
+	tornadoGroundX := (m.width-llW)/2 + artGroundCenter + lastSway
+
+	// Dirt road - simple brown line
+	for x := 0; x < m.width; x++ {
+		set(roadTop, x, '▂', roadFG)
+	}
+
+	// Uneven ground texture left of tornado (damage trail) - static, just scrolls
+	groundTex := []rune{'▂', '▃', '▄', '▂', '▃', ' '}
+	for x := 0; x < tornadoGroundX-2; x++ {
+		hash := x*7 + int(m.roadOffset)
+		if hash < 0 {
+			hash = -hash
+		}
+		if hash%3 != 0 {
+			set(roadTop, x, groundTex[hash%len(groundTex)], debrisFG)
+		}
+	}
+
+	// ── Helper to draw obstacles ──────────────────────────────────
+	type obstacleType int
+	const (
+		poleObstacle obstacleType = iota
+		treeObstacle
+		houseObstacle
+	)
+
+	drawObstacle := func(x int, typ obstacleType, dist float64, worldX int) {
+		// Determine color based on obstacle type for rubble
+		rubbleColor := debrisFG
+		switch typ {
+		case poleObstacle:
+			rubbleColor = poleFG
+		case treeObstacle:
+			rubbleColor = treeTrunkFG
+		case houseObstacle:
+			rubbleColor = houseFG
+		}
+
+		// If left of tornado - show as destroyed rubble (static, scrolls with damage path)
+		if dist < -2 {
+			// More rubble for houses, less for other obstacles
+			rubbleSpread := 2
+			if typ == houseObstacle {
+				rubbleSpread = 6 // More rubble after houses
+			}
+			// Scattered rubble pile - based on worldX so it's static relative to ground
+			for dx := -rubbleSpread; dx <= rubbleSpread; dx++ {
+				rx := x + dx
+				// Static rubble based on WORLD position (worldX) so it scrolls smoothly
+				shouldDraw := (worldX+dx)%7 == 0 || (worldX+dx)%11 == 3
+				if typ == houseObstacle {
+					shouldDraw = (worldX+dx)%3 != 0 // More dense for houses
+				}
+				if shouldDraw {
+					set(roadTop, rx, '▒', rubbleColor)
+				}
+			}
+			return
+		}
+
+		absDist := math.Abs(dist)
+
+		switch typ {
+		case poleObstacle:
+			// Wooden telephone pole with crossbars - thicker pole
+			switch {
+			case absDist < destroyFull:
+				// Pole being destroyed - scattered splinters, more natural
+				debrisRune := []rune{'▒', '░', '│', '─', '╱', '╲'}
+				for i := 0; i < 12; i++ {
+					dx := (x*7+i*13)%7 - 3
+					dy := (x*11 + i*17) % 6
+					row := poleTop + dy
+					if row <= roadTop {
+						r := debrisRune[(x+i)%len(debrisRune)]
+						set(row, x+dx, r, poleFG)
+					}
+				}
+			case absDist < destroyFar:
+				// Breaking pole - leans and snaps
+				leanDir := 1
+				if dist > 0 {
+					leanDir = -1
+				}
+				// Bent pole leaning - thicker
+				for row := poleTop + 1; row <= roadTop-1; row++ {
+					leanX := x + leanDir*int((destroyFar-absDist)/destroyFar*float64(row-poleTop)/2)
+					set(row, leanX, '┃', poleFG)
+				}
+				// Broken crossbar falling
+				set(poleTop, x+leanDir, '─', poleFG)
+				set(roadTop, x, '█', poleFG) // base
+			case absDist < shakeDist:
+				// Shaking pole - thicker
+				shake := int(math.Sin(m.animT*12+float64(x)) * (shakeDist - absDist) / shakeDist * 2)
+				px := x + shake
+				// Crossbar at top
+				set(poleTop, px-2, '─', poleFG)
+				set(poleTop, px-1, '─', poleFG)
+				set(poleTop, px, '┼', poleFG)
+				set(poleTop, px+1, '─', poleFG)
+				set(poleTop, px+2, '─', poleFG)
+				// Thicker pole down to road
+				for row := poleTop + 1; row <= roadTop; row++ {
+					set(row, px, '┃', poleFG)
+				}
+			default:
+				// Intact wooden telephone pole - thicker
+				// Crossbar at top
+				set(poleTop, x-2, '─', poleFG)
+				set(poleTop, x-1, '─', poleFG)
+				set(poleTop, x, '┼', poleFG)
+				set(poleTop, x+1, '─', poleFG)
+				set(poleTop, x+2, '─', poleFG)
+				// Thicker pole extends all the way down to touch road
+				for row := poleTop + 1; row <= roadTop; row++ {
+					set(row, x, '┃', poleFG)
+				}
+			}
+
+		case treeObstacle:
+			// Draw a tree at this position
+			drawTree := func(tx int, tdist float64) {
+				absTDist := math.Abs(tdist)
+				switch {
+				case absTDist < destroyFull:
+					// Tree splintering - wood colored debris
+					for dx := -3; dx <= 3; dx++ {
+						for dy := 0; dy < 4; dy++ {
+							set(roadTop-dy, tx+dx, '░', treeTrunkFG)
+						}
+					}
+				case absTDist < destroyFar:
+					// Tree falling
+					leanDir := 1
+					if tdist > 0 {
+						leanDir = -1
+					}
+					// Trunk
+					set(roadTop, tx, '│', treeTrunkFG)
+					set(roadTop-1, tx+leanDir, '/', treeTrunkFG)
+					set(roadTop-2, tx+leanDir*2, '/', treeTrunkFG)
+					// Leaves falling
+					set(roadTop-2, tx+leanDir*3, '▓', treeLeafFG)
+					set(roadTop-1, tx+leanDir*2, '▒', treeLeafFG)
+				case absTDist < shakeDist:
+					// Tree shaking
+					shake := int(math.Sin(m.animT*10+float64(tx)) * (shakeDist - absTDist) / shakeDist * 1.5)
+					tsx := tx + shake
+					// Trunk
+					set(roadTop, tsx, '│', treeTrunkFG)
+					set(roadTop-1, tsx, '│', treeTrunkFG)
+					// Leaves canopy
+					set(roadTop-2, tsx-1, '▓', treeLeafFG)
+					set(roadTop-2, tsx, '█', treeLeafFG)
+					set(roadTop-2, tsx+1, '▓', treeLeafFG)
+					set(roadTop-3, tsx, '▒', treeLeafFG)
+				default:
+					// Intact tree - brown trunk with green canopy
+					// Trunk
+					set(roadTop, x, '│', treeTrunkFG)
+					set(roadTop-1, x, '│', treeTrunkFG)
+					// Leaves canopy (bushy)
+					set(roadTop-2, x-1, '▓', treeLeafFG)
+					set(roadTop-2, x, '█', treeLeafFG)
+					set(roadTop-2, x+1, '▓', treeLeafFG)
+					set(roadTop-3, x-1, '▒', treeLeafFG)
+					set(roadTop-3, x, '█', treeLeafFG)
+					set(roadTop-3, x+1, '▒', treeLeafFG)
+				}
+			}
+
+			// Draw the main tree
+			drawTree(x, dist)
+
+		case houseObstacle:
+			// Draw house at this position - wider, better looking
+			drawHouse := func(hx int, hdist float64) {
+				absHDist := math.Abs(hdist)
+				switch {
+				case absHDist < destroyFull:
+					// House collapsing into rubble pile - house colored debris
+					for dx := -5; dx <= 5; dx++ {
+						for row := roadTop - 3; row <= roadTop; row++ {
+							if (hx+dx+row)%3 != 0 {
+								set(row, hx+dx, '▒', houseFG)
+							}
+						}
+					}
+				case absHDist < destroyFar:
+					// House damaged - roof falling, walls cracked
+					// Left wall crumbling
+					set(roadTop, hx-4, '█', houseFG)
+					set(roadTop-1, hx-4, '█', houseFG)
+					set(roadTop-2, hx-4, '▓', debrisFG)
+					// Right wall
+					set(roadTop, hx+4, '█', houseFG)
+					set(roadTop-1, hx+4, '█', houseFG)
+					set(roadTop-2, hx+4, '▓', houseFG)
+					// Floor
+					for dx := -3; dx <= 3; dx++ {
+						set(roadTop, hx+dx, '█', houseFG)
+					}
+					// Damaged roof with gap
+					set(roadTop-2, hx-3, '▓', houseFG)
+					set(roadTop-2, hx-2, '▓', houseFG)
+					set(roadTop-2, hx, '░', houseFG) // hole
+					set(roadTop-2, hx+2, '▓', houseFG)
+					set(roadTop-2, hx+3, '▓', houseFG)
+					set(roadTop-3, hx-2, '▒', houseFG)
+					set(roadTop-3, hx+2, '▒', houseFG)
+					set(roadTop-3, hx, '╲', houseFG) // falling debris
+				case absHDist < shakeDist:
+					// House shaking
+					shake := int(math.Sin(m.animT*6+float64(hx)) * (shakeDist - absHDist) / shakeDist)
+					sx := hx + shake
+					// Wide house with chimney
+					// Roof peak
+					set(roadTop-4, sx-2, '▒', houseFG)
+					set(roadTop-4, sx-1, '▓', houseFG)
+					set(roadTop-4, sx, '▓', houseFG)
+					set(roadTop-4, sx+1, '▓', houseFG)
+					set(roadTop-4, sx+2, '▒', houseFG)
+					// Chimney
+					set(roadTop-5, sx+1, '█', houseFG)
+					set(roadTop-5, sx+2, '█', houseFG)
+					// Roof slope
+					set(roadTop-3, sx-3, '▓', houseFG)
+					set(roadTop-3, sx-2, '▓', houseFG)
+					set(roadTop-3, sx-1, '▓', houseFG)
+					set(roadTop-3, sx, '▓', houseFG)
+					set(roadTop-3, sx+1, '▓', houseFG)
+					set(roadTop-3, sx+2, '▓', houseFG)
+					set(roadTop-3, sx+3, '▓', houseFG)
+					// Walls
+					for row := roadTop - 2; row <= roadTop; row++ {
+						set(row, sx-4, '█', houseFG)
+						set(row, sx+4, '█', houseFG)
+					}
+					// Floor
+					for dx := -3; dx <= 3; dx++ {
+						set(roadTop, sx+dx, '█', houseFG)
+					}
+					// Windows with frames
+					set(roadTop-2, sx-2, '░', "253")
+					set(roadTop-2, sx+2, '░', "253")
+					// Door with steps
+					set(roadTop-1, sx, '▓', "94")
+					set(roadTop, sx, '▓', "94")
+				default:
+					// Intact wide house with chimney
+					// Roof peak
+					set(roadTop-4, hx-2, '▒', houseFG)
+					set(roadTop-4, hx-1, '▓', houseFG)
+					set(roadTop-4, hx, '▓', houseFG)
+					set(roadTop-4, hx+1, '▓', houseFG)
+					set(roadTop-4, hx+2, '▒', houseFG)
+					// Chimney
+					set(roadTop-5, hx+1, '█', houseFG)
+					set(roadTop-5, hx+2, '█', houseFG)
+					// Roof slope
+					set(roadTop-3, hx-3, '▓', houseFG)
+					set(roadTop-3, hx-2, '▓', houseFG)
+					set(roadTop-3, hx-1, '▓', houseFG)
+					set(roadTop-3, hx, '▓', houseFG)
+					set(roadTop-3, hx+1, '▓', houseFG)
+					set(roadTop-3, hx+2, '▓', houseFG)
+					set(roadTop-3, hx+3, '▓', houseFG)
+					// Walls
+					for row := roadTop - 2; row <= roadTop; row++ {
+						set(row, hx-4, '█', houseFG)
+						set(row, hx+4, '█', houseFG)
+					}
+					// Floor
+					for dx := -3; dx <= 3; dx++ {
+						set(roadTop, hx+dx, '█', houseFG)
+					}
+					// Windows with frames
+					set(roadTop-2, hx-2, '░', "253")
+					set(roadTop-2, hx+2, '░', "253")
+					// Door with steps
+					set(roadTop-1, hx, '▓', "94")
+					set(roadTop, hx, '▓', "94")
+				}
+			}
+			drawHouse(x, dist)
+		}
+	}
+
+	// ── Draw all obstacles ────────────────────────────────────────
+	// All scroll at same constant speed (roadOffset) - infinite generation
+	scrollPos := int(m.roadOffset)
+
+	// Wrap scrollPos to prevent integer overflow and create seamless loop
+	// Use a large repeating pattern (LCM of spacings ~ 3000)
+	patternRepeat := 3000
+	wrappedScroll := scrollPos % patternRepeat
+	if wrappedScroll < 0 {
+		wrappedScroll += patternRepeat
+	}
+
+	// Generate telephone poles at irregular intervals - infinite pattern
+	poleIndex := 0
+	worldX := 0
+	for worldX < patternRepeat {
+		// Each pole has slightly different spacing (45-75)
+		spacing := poleBaseSpacing - 15 + (poleIndex*23)%30
+		worldX += spacing
+		// Calculate screen position with wrapping
+		screenX := worldX - wrappedScroll
+		if screenX < -10 {
+			screenX += patternRepeat
+		}
+		if screenX >= -10 && screenX < m.width+10 {
+			drawObstacle(screenX, poleObstacle, float64(screenX-tornadoGroundX), worldX)
+		}
+		poleIndex++
+	}
+
+	// Generate trees at fixed world positions with offsets - infinite pattern
+	for worldX := treeSpacing / 2; worldX < patternRepeat; worldX += treeSpacing {
+		offset := (worldX * 17) % 25
+		baseX := worldX + offset
+		screenX := baseX - wrappedScroll
+		if screenX < -10 {
+			screenX += patternRepeat
+		}
+		if screenX >= -10 && screenX < m.width+10 {
+			drawObstacle(screenX, treeObstacle, float64(screenX-tornadoGroundX), baseX)
+			// Second tree spawns near first tree
+			if (worldX*13)%4 == 0 {
+				secondX := screenX + 4 + ((worldX * 7) % 5)
+				// Only draw if second tree is also on screen
+				if secondX >= -10 && secondX < m.width+10 {
+					drawObstacle(secondX, treeObstacle, float64(secondX-tornadoGroundX), baseX+4)
+				}
+			}
+		}
+	}
+
+	// Generate houses at fixed world positions - infinite pattern
+	for worldX := houseSpacing; worldX < patternRepeat; worldX += houseSpacing {
+		offset := (worldX * 23) % 50
+		baseX := worldX + offset
+		screenX := baseX - wrappedScroll
+		if screenX < -10 {
+			screenX += patternRepeat
+		}
+		if screenX >= -10 && screenX < m.width+10 {
+			drawObstacle(screenX, houseObstacle, float64(screenX-tornadoGroundX), baseX)
+		}
+	}
+
+	// ── Compose: overlay tornado art on background ────────────────
+	renderCell := func(sb *strings.Builder, c bgCell) {
+		if c.fg == "" {
+			sb.WriteRune(' ')
+		} else {
+			sb.WriteString(stl(c.fg).Render(string(c.r)))
+		}
+	}
+
+	var out []string
 	for i, line := range tornadoAnimLines {
 		funnel := math.Pow(float64(i)/float64(maxConnectInt(1, n-1)), 1.2)
 		topWeight := 1.0 - funnel
 		amp := 5.0*topWeight + 2.0*funnel
 		phase := m.animT*3.1 + float64(i)*0.55
 		sway := int(math.Sin(phase) * amp)
-		pad := (m.width-lipgloss.Width(line))/2 + sway
+		lineW := lipgloss.Width(line)
+		pad := (m.width-lineW)/2 + sway
 		if pad < 0 {
 			pad = 0
 		}
-		styled := lipgloss.NewStyle().Foreground(styles.TextMuted).Render(line)
-		if i < 0 {
-			styled = lipgloss.NewStyle().Foreground(styles.Primary).Render(line)
+
+		tornadoRunes := []rune(line)
+		var sb strings.Builder
+		col := 0
+
+		// Pre-tornado columns
+		for ; col < pad && col < m.width; col++ {
+			renderCell(&sb, bg[i][col])
 		}
-		lineOut := strings.Repeat(" ", pad) + styled
-		lineOut = padToVisualWidth(lineOut, m.width)
-		out = append(out, lineOut)
+		// Tornado art — non-space chars win; spaces show background
+		for _, tr := range tornadoRunes {
+			if col >= m.width {
+				break
+			}
+			if tr != ' ' {
+				sb.WriteString(tornadoStyle.Render(string(tr)))
+			} else {
+				renderCell(&sb, bg[i][col])
+			}
+			col++
+		}
+		// Post-tornado columns
+		for ; col < m.width; col++ {
+			renderCell(&sb, bg[i][col])
+		}
+
+		out = append(out, sb.String())
 	}
 	return strings.Join(out, "\n")
 }
