@@ -1,16 +1,4 @@
 // Package main is the entry point for the Tornado TUI application.
-//
-// This file is responsible for:
-//   - Initializing the application with its starting state
-//   - Setting up logging (when DEBUG is set)
-//   - Creating and running the Bubble Tea program
-//   - Loading and applying user configuration
-//
-// Key Bubble Tea Concepts Used Here:
-//   - tea.NewProgram() creates the TUI program
-//   - tea.WithAltScreen() uses the alternate screen buffer (cleaner exit)
-//   - tea.WithMouseCellMotion() enables mouse support for clicking
-//
 // References:
 //   - https://charm.land/bubbletea/v2#quick-start
 package main
