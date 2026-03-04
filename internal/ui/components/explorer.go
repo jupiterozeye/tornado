@@ -292,7 +292,7 @@ func truncateLine(s string, width int) string {
 func (m *ExplorerModel) getIndent(node *TreeNode) string {
 	depth := 0
 	parent := node.Parent
-	for parent != nil && parent != m.root {
+	for parent != nil {
 		depth++
 		parent = parent.Parent
 	}

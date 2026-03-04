@@ -133,10 +133,10 @@ func NewBrowserModel(database db.Database) *BrowserModel {
 
 	// Create query editor
 	query := textarea.New()
-	query.Placeholder = "Enter SQL query..."
+	query.Placeholder = ""
 	query.SetHeight(10)
 	query.SetWidth(80)
-	query.ShowLineNumbers = true
+	query.ShowLineNumbers = false // Hide line numbers to remove scrollbar appearance
 	applyTextAreaStyles(&query)
 
 	// Create results table
@@ -418,8 +418,10 @@ func (m *BrowserModel) View() tea.View {
 		queryTitle = "Query [VISUAL LINE]"
 	}
 
-	// Get query view and normalize background to prevent terminal color bleeding
-	queryView := normalizeBackground(m.query.View(), styles.BgDark)
+	// Wrap textarea in themed background to prevent terminal color bleeding
+	// The textarea output gets wrapped in a style that forces theme background on every cell
+	queryContent := m.query.View()
+	queryView := lipgloss.NewStyle().Background(styles.BgDark).Render(queryContent)
 	queryPane := m.renderPane(queryTitle, "q", queryView, qw, qh, m.focusedPane == PaneQuery, styles.BgDark)
 
 	// Render results
@@ -443,7 +445,9 @@ func (m *BrowserModel) View() tea.View {
 		case PaneExplorer:
 			main = m.renderPane("Explorer", "e", explorerContent, m.width, m.mainHeight(), m.focusedPane == PaneExplorer, styles.BgDefault)
 		case PaneQuery:
-			main = m.renderPane(queryTitle, "q", m.query.View(), m.width, m.mainHeight(), m.focusedPane == PaneQuery, styles.BgDark)
+			// Ensure textarea has proper background by wrapping in themed container
+			queryContent := lipgloss.NewStyle().Background(styles.BgDark).Render(m.query.View())
+			main = m.renderPane(queryTitle, "q", queryContent, m.width, m.mainHeight(), m.focusedPane == PaneQuery, styles.BgDark)
 		case PaneResults:
 			main = m.renderPane("Results", "r", resultsContent, m.width, m.mainHeight(), m.focusedPane == PaneResults, styles.BgDefault)
 		}
@@ -949,14 +953,27 @@ func (m *BrowserModel) initExplorer() tea.Cmd {
 func (m *BrowserModel) updateComponentSizes() {
 	ew, eh, qw, qh, rw, rh := m.paneDimensions()
 
+	// Handle maximized pane - use full main height for the maximized pane
+	if m.maximizedPane == PaneQuery {
+		qh = m.mainHeight()
+		qw = m.width
+	} else if m.maximizedPane == PaneResults {
+		rh = m.mainHeight()
+		rw = m.width
+	} else if m.maximizedPane == PaneExplorer {
+		eh = m.mainHeight()
+		ew = m.width
+	}
+
 	// Update explorer size
 	if m.explorer != nil && m.showExplorer {
 		m.explorer.SetSize(ew, eh)
 	}
 
 	// Update query editor size
+	// Border takes 2 lines + header, so content height is qh - 3
 	m.query.SetWidth(maxInt(10, qw-6))
-	m.query.SetHeight(maxInt(3, qh-6))
+	m.query.SetHeight(maxInt(3, qh-3))
 
 	// Update results table size
 	m.results.SetWidth(maxInt(10, rw-6))
@@ -1449,7 +1466,8 @@ func applyTextAreaStyles(ta *textarea.Model) {
 	bg := styles.BgDark
 	cursorBg := styles.BgLight
 
-	// Focused styles with visible cursor
+	// Focused styles with visible cursor - ALL components must have theme background
+	// Note: Base style should NOT have explicit Width/Height - let textarea handle sizing
 	s.Focused.Base = lipgloss.NewStyle().Background(bg)
 	s.Focused.Text = lipgloss.NewStyle().Foreground(styles.Text).Background(bg)
 	s.Focused.Placeholder = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)
@@ -1459,7 +1477,7 @@ func applyTextAreaStyles(ta *textarea.Model) {
 	s.Focused.EndOfBuffer = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)
 	s.Focused.Prompt = lipgloss.NewStyle().Foreground(styles.Primary).Background(bg)
 
-	// Blurred styles
+	// Blurred styles - ALL components must have theme background
 	s.Blurred.Base = lipgloss.NewStyle().Background(bg)
 	s.Blurred.Text = lipgloss.NewStyle().Foreground(styles.Text).Background(bg)
 	s.Blurred.Placeholder = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)

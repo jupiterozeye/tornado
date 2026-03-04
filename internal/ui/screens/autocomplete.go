@@ -256,25 +256,22 @@ func (m *AutocompleteModel) Render() string {
 	}
 	defaultStyle := lipgloss.NewStyle().Foreground(styles.Text)
 
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.BorderFocus).
-		Background(styles.BgDark)
-
+	// Build content with explicit background on every element
 	var lines []string
 	for i := start; i < end; i++ {
 		sugg := m.Suggestions[i]
-		style, ok := typeStyles[sugg.Type]
-		if !ok {
-			style = defaultStyle
-		}
-
-		line := style.Render(sugg.Text)
+		var line string
 		if i == m.Selected {
 			line = lipgloss.NewStyle().
 				Background(styles.Primary).
 				Foreground(styles.BgDark).
 				Render(" " + sugg.Text + " ")
+		} else {
+			style, ok := typeStyles[sugg.Type]
+			if !ok {
+				style = defaultStyle
+			}
+			line = style.Background(styles.BgDark).Render(sugg.Text)
 		}
 		lines = append(lines, line)
 	}
@@ -283,12 +280,29 @@ func (m *AutocompleteModel) Render() string {
 	if len(m.Suggestions) > maxDisplay {
 		countLine := lipgloss.NewStyle().
 			Foreground(styles.TextMuted).
+			Background(styles.BgDark).
 			Render("... " + string(rune('0'+len(m.Suggestions)-maxDisplay)) + " more")
 		lines = append(lines, countLine)
 	}
 
+	// Pad content to ensure minimum height for consistent rendering
+	innerWidth := m.Width - 6 // Account for borders and padding
+	minContentHeight := maxDisplay
+	for len(lines) < minContentHeight {
+		lines = append(lines, lipgloss.NewStyle().Background(styles.BgDark).Render(strings.Repeat(" ", innerWidth)))
+	}
+
 	content := strings.Join(lines, "\n")
-	return borderStyle.Render(content)
+
+	// Apply border with background - the key is applying background to the WHOLE style including border
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.BorderFocus).
+		BorderBackground(styles.BgDark).
+		Background(styles.BgDark).
+		Padding(0, 1)
+
+	return boxStyle.Render(content)
 }
 
 // HandleKey handles key presses when autocomplete is active
