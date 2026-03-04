@@ -297,14 +297,15 @@ func (m *BrowserModel) View() tea.View {
 		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(styles.BgDefault)))
 
 	// Use lipgloss compositing for overlays
+	view := tea.View{Content: base, AltScreen: true}
 	if m.leaderActive {
-		return tea.View{Content: m.renderWithLeaderMenu(base)}
+		view.Content = m.renderWithLeaderMenu(base)
 	}
 	if m.themeMenu {
-		return tea.View{Content: m.renderWithThemeMenu(base)}
+		view.Content = m.renderWithThemeMenu(base)
 	}
 
-	return tea.View{Content: base}
+	return view
 }
 
 func (m *BrowserModel) decoratePane(title, key, content string, paneWidth, paneHeight int) string {
@@ -538,9 +539,9 @@ func (m *BrowserModel) handleThemeMenuKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 				applyTextAreaStyles(&m.query)
 				applyTableStyles(&m.results)
 				m.statusMsg = "Theme: " + it.name
-				// Save theme preference
+				// Save theme preference (async)
 				if cfg := config.Get(); cfg != nil {
-					cfg.SetTheme(it.name)
+					go cfg.SetTheme(it.name)
 				}
 			}
 		}
@@ -844,12 +845,11 @@ func (m *BrowserModel) executeQuery() tea.Cmd {
 		return nil
 	}
 
-	// Save query to history
-	if cfg := config.Get(); cfg != nil {
-		cfg.AddQuery(query)
-	}
-
 	return func() tea.Msg {
+		// Save query to history (async)
+		if cfg := config.Get(); cfg != nil {
+			go cfg.AddQuery(query)
+		}
 		// Try to determine if it's a query or exec
 		upperQuery := ""
 		for _, r := range query {

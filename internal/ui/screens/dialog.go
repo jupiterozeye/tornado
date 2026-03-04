@@ -30,7 +30,7 @@ func renderDialogBox(title string, body []string, subtitle string, width int) st
 	for _, entry := range body {
 		subLines := strings.Split(entry, "\n")
 		for _, line := range subLines {
-			line = truncateToWidth(line, innerWidth)
+			line = truncateString(line, innerWidth)
 			out = append(out, borderStyle.Render("│")+bodyStyle.Render(line)+borderStyle.Render("│"))
 		}
 	}
@@ -44,11 +44,32 @@ func makeDialogTopBorder(label string, width int) string {
 		return ""
 	}
 	segment := "─ " + label + " "
-	segment = truncateToWidth(segment, width)
+	segment = truncateString(segment, width)
 	if lipgloss.Width(segment) < width {
 		segment += strings.Repeat("─", width-lipgloss.Width(segment))
 	}
 	return segment
+}
+
+// truncateString truncates a string to fit within width without adding ellipsis
+func truncateString(s string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	w := lipgloss.Width(s)
+	if w <= width {
+		return s
+	}
+	// Simple truncation without ellipsis
+	runes := []rune(s)
+	result := ""
+	for _, r := range runes {
+		if lipgloss.Width(result+string(r)) > width {
+			break
+		}
+		result += string(r)
+	}
+	return result
 }
 
 func makeDialogBottomBorder(label string, width int) string {
