@@ -75,11 +75,6 @@ func (a *App) Init() tea.Cmd {
 }
 
 // Update handles incoming messages and updates the model accordingly.
-// This is where you handle:
-//   - Global keybindings (quit, help, navigation)
-//   - Screen transition messages
-//   - Window resize events
-//   - Messages from child screens
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -145,8 +140,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Pass all other messages to current screen
 		return a.delegateToActiveScreen(msg)
 	}
-
-	return a, nil
 }
 
 // Helper methods
@@ -205,7 +198,6 @@ func (a *App) delegateToActiveScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the current state of the application.
-// It delegates rendering to the active screen.
 func (a *App) View() tea.View {
 	// Get active screen's view
 	v := a.getActiveScreen().View()
