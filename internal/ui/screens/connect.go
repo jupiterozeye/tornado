@@ -433,7 +433,7 @@ func (m *ConnectModel) renderTornadoAnimation() string {
 	roadTop := n - 1 // grass
 	poleTop := n - 6 // telephone poles start here and go down to road
 
-	// ── Tornado ground contact X ──────────────────────────────────
+	// Tornado ground contact X ──────────────────────────────────
 	lastI := n - 1
 	lastF := math.Pow(float64(lastI)/float64(maxConnectInt(1, n-1)), 1.2)
 	lastAmp := 5.0*(1.0-lastF) + 2.0*lastF
@@ -656,13 +656,13 @@ func (m *ConnectModel) renderTornadoAnimation() string {
 				case absHDist < destroyFar:
 					// House damaged - roof falling, walls cracked
 					// Left wall crumbling
-					set(roadTop, hx-5, '█', wallFG)
-					set(roadTop-1, hx-5, '█', wallFG)
-					set(roadTop-2, hx-5, '▓', wallFG)
+					set(roadTop, hx-4, '█', wallFG)
+					set(roadTop-1, hx-4, '█', wallFG)
+					set(roadTop-2, hx-4, '▓', wallFG)
 					// Right wall
-					set(roadTop, hx+5, '█', wallFG)
-					set(roadTop-1, hx+5, '█', wallFG)
-					set(roadTop-2, hx+5, '▓', wallFG)
+					set(roadTop, hx+4, '█', wallFG)
+					set(roadTop-1, hx+4, '█', wallFG)
+					set(roadTop-2, hx+4, '▓', wallFG)
 					// Floor
 					for dx := -4; dx <= 4; dx++ {
 						set(roadTop, hx+dx, '█', wallFG)
