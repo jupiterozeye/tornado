@@ -91,7 +91,7 @@ func Load() (*Config, error) {
 	// Check if config file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// Create default config
-		if err := cfg.Save(); err != nil {
+		if err := cfg.saveUnlocked(); err != nil {
 			return nil, fmt.Errorf("failed to create default config: %w", err)
 		}
 	} else {
@@ -114,10 +114,16 @@ func Load() (*Config, error) {
 }
 
 // Save persists the configuration to disk.
+// Safe to call from outside the struct (acquires read lock).
 func (c *Config) Save() error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	return c.saveUnlocked()
+}
 
+// saveUnlocked persists without acquiring any mutex.
+// Must only be called when the caller already holds the lock (or during init).
+func (c *Config) saveUnlocked() error {
 	// Ensure config directory exists
 	configDir := filepath.Dir(c.configPath)
 	if err := os.MkdirAll(configDir, 0755); err != nil {
@@ -147,16 +153,14 @@ func (c *Config) GetTheme() string {
 func (c *Config) SetTheme(theme string) error {
 	c.mu.Lock()
 	c.Theme = theme
+	err := c.saveUnlocked()
 	c.mu.Unlock()
-	return c.Save()
+	return err
 }
 
 // AddConnection adds a successful connection to history.
 // If the connection already exists, it updates the timestamp and use count.
 func (c *Config) AddConnection(cfg models.ConnectionConfig) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	// Create entry from config (no password stored)
 	entry := ConnectionEntry{
 		Name:          cfg.Name,
@@ -180,6 +184,9 @@ func (c *Config) AddConnection(cfg models.ConnectionConfig) error {
 		}
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	// Check if connection already exists
 	for i, existing := range c.Connections {
 		if connectionsEqual(existing, entry) {
@@ -188,7 +195,7 @@ func (c *Config) AddConnection(cfg models.ConnectionConfig) error {
 			c.Connections[i].UseCount++
 			// Move to front
 			c.moveConnectionToFront(i)
-			return c.Save()
+			return c.saveUnlocked()
 		}
 	}
 
@@ -200,7 +207,7 @@ func (c *Config) AddConnection(cfg models.ConnectionConfig) error {
 		c.Connections = c.Connections[:maxConnections]
 	}
 
-	return c.Save()
+	return c.saveUnlocked()
 }
 
 // GetConnections returns the list of recent connections.
@@ -230,20 +237,19 @@ func (e ConnectionEntry) ToConnectionConfig() models.ConnectionConfig {
 
 // AddQuery adds a query to recent queries history.
 func (c *Config) AddQuery(query string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Don't add empty queries
 	if query == "" {
 		return nil
 	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	// Check if query already exists
 	for i, existing := range c.Queries {
 		if existing == query {
 			// Move to front
 			c.moveQueryToFront(i)
-			return c.Save()
+			return c.saveUnlocked()
 		}
 	}
 
@@ -255,7 +261,7 @@ func (c *Config) AddQuery(query string) error {
 		c.Queries = c.Queries[:maxQueries]
 	}
 
-	return c.Save()
+	return c.saveUnlocked()
 }
 
 // GetQueries returns the list of recent queries.
@@ -293,23 +299,20 @@ func connectionsEqual(a, b ConnectionEntry) bool {
 	if a.Type != b.Type {
 		return false
 	}
-	if a.Type == "sqlite" {
+	switch a.Type {
+	case "sqlite":
 		return a.Path == b.Path
+	case "postgres":
+		return a.Host == b.Host && a.Port == b.Port && a.User == b.User && a.Database == b.Database
 	}
-	return a.Host == b.Host && a.Port == b.Port && a.Database == b.Database && a.User == b.User
+	return false
 }
 
+// getConfigPath returns the path to the config file using XDG conventions.
 func getConfigPath() (string, error) {
-	// Check for XDG_CONFIG_HOME
-	configHome := os.Getenv("XDG_CONFIG_HOME")
-	if configHome == "" {
-		// Fallback to ~/.config
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("failed to get home directory: %w", err)
-		}
-		configHome = filepath.Join(home, ".config")
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get config directory: %w", err)
 	}
-
-	return filepath.Join(configHome, appName, configFileName), nil
+	return filepath.Join(configDir, appName, configFileName), nil
 }

@@ -24,8 +24,10 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"image/color"
+	"regexp"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -58,6 +60,8 @@ type QueryMode int
 const (
 	QueryModeNormal QueryMode = iota
 	QueryModeInsert
+	QueryModeVisual
+	QueryModeVisualLine
 )
 
 type browserThemeItem struct{ name string }
@@ -95,6 +99,31 @@ type BrowserModel struct {
 	// Query results
 	currentResults *models.QueryResult
 	queryError     string
+
+	// Autocomplete
+	autocomplete *AutocompleteModel
+
+	// Schema cache for autocomplete
+	tables  []string
+	columns map[string][]string
+
+	// Visual mode selection tracking
+	visualStart struct {
+		row int
+		col int
+	}
+	visualEnd struct {
+		row int
+		col int
+	}
+	yankBuffer string
+
+	// Context for cancelling background operations
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// Track if cleanup has been called
+	cleanedUp bool
 }
 
 // NewBrowserModel creates a new browser screen model.
@@ -128,7 +157,9 @@ func NewBrowserModel(database db.Database) *BrowserModel {
 	themeList.SetShowStatusBar(false)
 	themeList.SetFilteringEnabled(false)
 
-	return &BrowserModel{
+	ctx, cancel := context.WithCancel(context.Background())
+
+	m := &BrowserModel{
 		db:            database,
 		layoutManager: l,
 		query:         query,
@@ -139,6 +170,72 @@ func NewBrowserModel(database db.Database) *BrowserModel {
 		showExplorer:  true,
 		themeList:     themeList,
 		maximizedPane: PaneNone,
+		autocomplete:  NewAutocompleteModel(),
+		columns:       make(map[string][]string),
+		ctx:           ctx,
+		cancel:        cancel,
+	}
+
+	// Load schema for autocomplete
+	go m.loadSchema()
+
+	return m
+}
+
+// loadSchema loads table and column names from the database
+func (m *BrowserModel) loadSchema() {
+	if m.db == nil {
+		return
+	}
+
+	// Check context before starting
+	select {
+	case <-m.ctx.Done():
+		return
+	default:
+	}
+
+	// Query for tables
+	result, err := m.db.Query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+	if err != nil {
+		return
+	}
+
+	// Check context after query
+	select {
+	case <-m.ctx.Done():
+		return
+	default:
+	}
+
+	var tables []string
+	for _, row := range result.Rows {
+		if len(row) > 0 && row[0] != nil {
+			tables = append(tables, row[0].(string))
+		}
+	}
+	m.tables = tables
+
+	// Query for columns of each table
+	for _, table := range tables {
+		// Check context before each table query
+		select {
+		case <-m.ctx.Done():
+			return
+		default:
+		}
+
+		result, err := m.db.Query("PRAGMA table_info(" + table + ")")
+		if err != nil {
+			continue
+		}
+		var cols []string
+		for _, row := range result.Rows {
+			if len(row) > 1 && row[1] != nil {
+				cols = append(cols, row[1].(string))
+			}
+		}
+		m.columns[table] = cols
 	}
 }
 
@@ -176,12 +273,41 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Global key bindings
+		// When in Query pane with INSERT mode, route all keys directly to query editor
+		// This prevents global shortcuts like 'e', 'q', 'r' from interfering with typing
+		if m.focusedPane == PaneQuery && m.queryMode == QueryModeInsert {
+			// Check if autocomplete is visible and handle its keys
+			if m.autocomplete.Visible {
+				handled, suggestion := m.autocomplete.HandleKey(msg)
+				if handled {
+					if suggestion != "" {
+						// Apply the suggestion
+						m.applyAutocompleteSuggestion(suggestion)
+					}
+					return m, nil
+				}
+			}
+
+			switch msg.String() {
+			case "ctrl+enter":
+				return m, m.executeQuery()
+			case "esc":
+				m.autocomplete.Visible = false
+				m.queryMode = QueryModeNormal
+				m.query.Blur()
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.query, cmd = m.query.Update(msg)
+				// Trigger autocomplete after typing (use text length as cursor pos)
+				cursorPos := len(m.query.Value())
+				return m, tea.Batch(cmd, TriggerAutocomplete(m.query.Value(), cursorPos))
+			}
+		}
+
+		// Global key bindings (only processed when NOT in INSERT mode)
 		switch msg.String() {
 		case "space":
-			if m.focusedPane == PaneQuery && m.queryMode == QueryModeInsert {
-				return m.routeKeyMsg(msg)
-			}
 			// Show leader menu immediately
 			m.leaderActive = true
 			m.themeMenu = false
@@ -227,6 +353,29 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusedPane = PaneResults
 		m.updateFocus()
 		return m, nil
+
+	case TriggerAutocompleteMsg:
+		// Only process if still in INSERT mode and focused on query
+		if m.focusedPane != PaneQuery || m.queryMode != QueryModeInsert {
+			return m, nil
+		}
+		// Check if query text matches current state
+		if msg.QueryText != m.query.Value() {
+			return m, nil
+		}
+
+		ctx := getQueryContext(msg.QueryText, msg.CursorPos)
+		suggestions := getSuggestions(ctx, m.tables, m.columns)
+
+		if len(suggestions) > 0 {
+			m.autocomplete.Suggestions = suggestions
+			m.autocomplete.Selected = 0
+			m.autocomplete.Visible = true
+			m.autocomplete.TriggerPos = msg.CursorPos
+		} else {
+			m.autocomplete.Visible = false
+		}
+		return m, nil
 	}
 
 	// Pass messages to explorer
@@ -258,12 +407,20 @@ func (m *BrowserModel) View() tea.View {
 		explorerPane = m.renderPane("Explorer", "e", explorerContent, ew, eh, m.focusedPane == PaneExplorer, styles.BgDefault)
 	}
 
-	// Render query editor
+	// Render query editor - ensure textarea has consistent background
 	queryTitle := "Query [NORMAL]"
-	if m.queryMode == QueryModeInsert {
+	switch m.queryMode {
+	case QueryModeInsert:
 		queryTitle = "Query [INSERT]"
+	case QueryModeVisual:
+		queryTitle = "Query [VISUAL]"
+	case QueryModeVisualLine:
+		queryTitle = "Query [VISUAL LINE]"
 	}
-	queryPane := m.renderPane(queryTitle, "q", m.query.View(), qw, qh, m.focusedPane == PaneQuery, styles.BgDark)
+
+	// Get query view and normalize background to prevent terminal color bleeding
+	queryView := normalizeBackground(m.query.View(), styles.BgDark)
+	queryPane := m.renderPane(queryTitle, "q", queryView, qw, qh, m.focusedPane == PaneQuery, styles.BgDark)
 
 	// Render results
 	resultsContent := m.renderResults()
@@ -303,6 +460,9 @@ func (m *BrowserModel) View() tea.View {
 	}
 	if m.themeMenu {
 		view.Content = m.renderWithThemeMenu(base)
+	}
+	if m.autocomplete.Visible {
+		view.Content = m.renderWithAutocomplete(base)
 	}
 
 	return view
@@ -427,13 +587,18 @@ func (m *BrowserModel) renderContextFooter() string {
 	case PaneExplorer:
 		text = m.explorerFooterText()
 	case PaneQuery:
-		if m.queryMode == QueryModeInsert {
-			text = "Query INSERT: Esc Normal  Enter Newline"
-		} else {
-			text = "Query NORMAL: i Insert  Enter Execute  e Explorer  r Results"
+		switch m.queryMode {
+		case QueryModeInsert:
+			text = "Query INSERT: Esc→Normal  Enter Newline  Ctrl+Enter Execute"
+		case QueryModeVisual:
+			text = "Query VISUAL: y Yank  d Delete  c Change  >/< Indent  Esc→Normal"
+		case QueryModeVisualLine:
+			text = "Query VISUAL LINE: y Yank  d Delete  c Change  >/< Indent  Esc→Normal"
+		default:
+			text = "Query NORMAL: i Insert  a Append  v Visual  V Visual Line  Enter Execute"
 		}
 	case PaneResults:
-		text = "Results: j/k Move  q Query  e Explorer"
+		text = "Results: j/k Move  q Query  e Explorer  Space Commands"
 	}
 
 	line := truncateToWidth(text, m.width)
@@ -503,9 +668,6 @@ func (m *BrowserModel) executeLeaderCommand(key string) (tea.Model, tea.Cmd) {
 	case "c":
 		return m, func() tea.Msg { return RequestConnectMsg{} }
 	case "x":
-		if m.db != nil {
-			_ = m.db.Disconnect()
-		}
 		return m, func() tea.Msg { return RequestConnectMsg{} }
 	case "t":
 		m.themeMenu = true
@@ -562,9 +724,6 @@ func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyPressMsg) (bool, tea.C
 
 	switch msg.String() {
 	case "x":
-		if m.db != nil {
-			_ = m.db.Disconnect()
-		}
 		return true, func() tea.Msg { return RequestConnectMsg{} }
 	case "n":
 		m.statusMsg = "New connection: coming soon"
@@ -632,6 +791,44 @@ func (m *BrowserModel) renderWithThemeMenu(base string) string {
 	}
 	if y < 0 {
 		y = 0
+	}
+
+	baseLayer := lipgloss.NewLayer(base)
+	menuLayer := lipgloss.NewLayer(menu).X(x).Y(y).Z(1)
+
+	comp := lipgloss.NewCompositor(baseLayer, menuLayer)
+	return comp.Render()
+}
+
+// renderWithAutocomplete overlays the autocomplete dropdown near the query editor
+func (m *BrowserModel) renderWithAutocomplete(base string) string {
+	menu := m.autocomplete.Render()
+	if menu == "" {
+		return base
+	}
+
+	// Position autocomplete near the query pane
+	_, _, _, _, _, _ = m.paneDimensions()
+	boxW := m.autocomplete.Width
+
+	// Position in the query pane area
+	var x, y int
+	if m.showExplorer {
+		// Query pane is on the right side
+		_, _, ew, _ := m.layoutManager.GetExplorerBounds()
+		x = ew + 4 // After explorer + some padding
+	} else {
+		x = 2
+	}
+	// Position near the top of query pane
+	y = 4
+
+	// Ensure it doesn't go off screen
+	if x+boxW > m.width {
+		x = m.width - boxW - 2
+	}
+	if x < 0 {
+		x = 0
 	}
 
 	baseLayer := lipgloss.NewLayer(base)
@@ -736,10 +933,7 @@ func truncateToWidth(s string, width int) string {
 	if width < 1 {
 		return ""
 	}
-	if width == 1 {
-		return xansi.Truncate(s, width, "")
-	}
-	return xansi.Truncate(s, width, "…")
+	return xansi.Truncate(s, width, "")
 }
 
 // Helper methods
@@ -809,34 +1003,328 @@ func (m *BrowserModel) routeKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case PaneQuery:
-		switch m.queryMode {
-		case QueryModeNormal:
-			switch msg.String() {
-			case "i", "a":
-				m.queryMode = QueryModeInsert
-				m.query.Focus()
-				return m, nil
-			case "enter":
-				return m, m.executeQuery()
-			default:
-				return m, nil
-			}
-		case QueryModeInsert:
-			if msg.String() == "esc" {
-				m.queryMode = QueryModeNormal
-				m.query.Blur()
-				return m, nil
-			}
-			var cmd tea.Cmd
-			m.query, cmd = m.query.Update(msg)
-			return m, cmd
-		}
+		return m.handleQueryKey(msg)
 	case PaneResults:
 		var cmd tea.Cmd
 		m.results, cmd = m.results.Update(msg)
 		return m, cmd
 	}
 	return m, nil
+}
+
+// handleQueryKey handles all key inputs for the query editor with vim-like modal editing
+func (m *BrowserModel) handleQueryKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch m.queryMode {
+	case QueryModeNormal:
+		return m.handleQueryNormalMode(msg)
+	case QueryModeInsert:
+		// This should not happen - INSERT mode keys are handled in Update()
+		// But handle ESC just in case
+		if msg.String() == "esc" {
+			m.queryMode = QueryModeNormal
+			m.query.Blur()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.query, cmd = m.query.Update(msg)
+		return m, cmd
+	case QueryModeVisual:
+		return m.handleQueryVisualMode(msg)
+	case QueryModeVisualLine:
+		return m.handleQueryVisualMode(msg)
+	}
+	return m, nil
+}
+
+// handleQueryNormalMode handles keys in NORMAL mode
+func (m *BrowserModel) handleQueryNormalMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	// Mode switching
+	case "i":
+		m.queryMode = QueryModeInsert
+		m.query.Focus()
+		return m, nil
+	case "a":
+		m.queryMode = QueryModeInsert
+		m.query.Focus()
+		return m, nil
+	case "I":
+		m.queryMode = QueryModeInsert
+		m.query.Focus()
+		return m, nil
+	case "A":
+		m.queryMode = QueryModeInsert
+		m.query.Focus()
+		return m, nil
+	case "v":
+		// Enter character-wise visual mode
+		m.queryMode = QueryModeVisual
+		m.visualStart.row = m.query.Line()
+		m.visualStart.col = m.query.Column()
+		m.visualEnd = m.visualStart
+		m.statusMsg = "-- VISUAL --"
+		return m, nil
+	case "V":
+		// Enter line-wise visual mode
+		m.queryMode = QueryModeVisualLine
+		m.visualStart.row = m.query.Line()
+		m.visualStart.col = 0
+		m.visualEnd = m.visualStart
+		m.statusMsg = "-- VISUAL LINE --"
+		return m, nil
+
+	// Execute query
+	case "enter":
+		return m, m.executeQuery()
+
+	// Navigation - pass through to textarea which handles these internally
+	case "up", "down", "left", "right",
+		"home", "end",
+		"pgup", "pgdown":
+		var cmd tea.Cmd
+		m.query, cmd = m.query.Update(msg)
+		return m, cmd
+
+	default:
+		return m, nil
+	}
+}
+
+// handleQueryVisualMode handles keys in VISUAL mode
+func (m *BrowserModel) handleQueryVisualMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.queryMode = QueryModeNormal
+		m.statusMsg = ""
+		return m, nil
+	case "y":
+		selected := m.getSelectedQueryText()
+		if selected != "" {
+			m.yankBuffer = selected
+		}
+		m.queryMode = QueryModeNormal
+		m.statusMsg = "yanked"
+		return m, nil
+	case "d", "x":
+		m.deleteSelectedQueryText()
+		m.queryMode = QueryModeNormal
+		m.statusMsg = "deleted"
+		return m, nil
+	case ">":
+		m.indentSelectedLines(true)
+		m.queryMode = QueryModeNormal
+		return m, nil
+	case "<":
+		m.indentSelectedLines(false)
+		m.queryMode = QueryModeNormal
+		return m, nil
+	case "p":
+		if m.yankBuffer != "" {
+			m.deleteSelectedQueryText()
+			m.query.InsertString(m.yankBuffer)
+		}
+		m.queryMode = QueryModeNormal
+		return m, nil
+	case "c":
+		m.deleteSelectedQueryText()
+		m.queryMode = QueryModeInsert
+		m.query.Focus()
+		return m, nil
+	default:
+		// Navigation extends selection
+		var cmd tea.Cmd
+		m.query, cmd = m.query.Update(msg)
+		m.visualEnd.row = m.query.Line()
+		m.visualEnd.col = m.query.Column()
+		return m, cmd
+	}
+}
+
+func (m *BrowserModel) selectedQueryRange() (start, end int, ok bool) {
+	text := m.query.Value()
+	if text == "" {
+		return 0, 0, false
+	}
+	start = lineColToIndex(text, m.visualStart.row, m.visualStart.col)
+	end = lineColToIndex(text, m.visualEnd.row, m.visualEnd.col)
+	if m.queryMode == QueryModeVisualLine {
+		start = lineColToIndex(text, minInt(m.visualStart.row, m.visualEnd.row), 0)
+		endLine := maxInt(m.visualStart.row, m.visualEnd.row)
+		lines := strings.Split(text, "\n")
+		if endLine >= len(lines) {
+			endLine = len(lines) - 1
+		}
+		end = lineColToIndex(text, endLine, len(lines[endLine]))
+	}
+	if start > end {
+		start, end = end, start
+	}
+	if start == end {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+func (m *BrowserModel) getSelectedQueryText() string {
+	text := m.query.Value()
+	start, end, ok := m.selectedQueryRange()
+	if !ok || start < 0 || end > len(text) {
+		return ""
+	}
+	return text[start:end]
+}
+
+func (m *BrowserModel) deleteSelectedQueryText() {
+	text := m.query.Value()
+	start, end, ok := m.selectedQueryRange()
+	if !ok || start < 0 || end > len(text) {
+		return
+	}
+	newText := text[:start] + text[end:]
+	m.query.SetValue(newText)
+	row, col := indexToLineCol(newText, start)
+	m.setQueryCursor(row, col)
+}
+
+func (m *BrowserModel) indentSelectedLines(indent bool) {
+	text := m.query.Value()
+	if text == "" {
+		return
+	}
+	startLine := minInt(m.visualStart.row, m.visualEnd.row)
+	endLine := maxInt(m.visualStart.row, m.visualEnd.row)
+	lines := strings.Split(text, "\n")
+	if startLine < 0 {
+		startLine = 0
+	}
+	if endLine >= len(lines) {
+		endLine = len(lines) - 1
+	}
+	for i := startLine; i <= endLine; i++ {
+		if indent {
+			lines[i] = "  " + lines[i]
+		} else if strings.HasPrefix(lines[i], "  ") {
+			lines[i] = lines[i][2:]
+		} else if strings.HasPrefix(lines[i], " ") {
+			lines[i] = lines[i][1:]
+		}
+	}
+	m.query.SetValue(strings.Join(lines, "\n"))
+	m.setQueryCursor(startLine, 0)
+}
+
+func (m *BrowserModel) setQueryCursor(line, col int) {
+	if line < 0 {
+		line = 0
+	}
+	if col < 0 {
+		col = 0
+	}
+	m.query.MoveToBegin()
+	for i := 0; i < line; i++ {
+		m.query.CursorDown()
+	}
+	m.query.SetCursorColumn(col)
+}
+
+func lineColToIndex(text string, row, col int) int {
+	if row < 0 {
+		row = 0
+	}
+	if col < 0 {
+		col = 0
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 {
+		return 0
+	}
+	if row >= len(lines) {
+		row = len(lines) - 1
+	}
+	idx := 0
+	for i := 0; i < row; i++ {
+		idx += len(lines[i]) + 1
+	}
+	if col > len(lines[row]) {
+		col = len(lines[row])
+	}
+	return idx + col
+}
+
+func indexToLineCol(text string, idx int) (row, col int) {
+	if idx < 0 {
+		idx = 0
+	}
+	if idx > len(text) {
+		idx = len(text)
+	}
+	row, col = 0, 0
+	for i := 0; i < idx; i++ {
+		if text[i] == '\n' {
+			row++
+			col = 0
+		} else {
+			col++
+		}
+	}
+	return
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// normalizeBackground strips background color ANSI codes from text
+// to prevent terminal color bleeding while preserving foreground colors
+func normalizeBackground(text string, bg color.Color) string {
+	// Regex to match ANSI background color codes (SGR 40-49, 100-109, or 48;5;n)
+	// This preserves foreground colors and other attributes
+	bgColorPattern := regexp.MustCompile(`\x1b\[(4[0-9]|10[0-9]|48;5;[0-9]+)m`)
+
+	// Remove background color codes
+	normalized := bgColorPattern.ReplaceAllString(text, "")
+
+	return normalized
+}
+
+// applyAutocompleteSuggestion applies the selected autocomplete suggestion
+func (m *BrowserModel) applyAutocompleteSuggestion(suggestion string) {
+	query := m.query.Value()
+	triggerPos := m.autocomplete.TriggerPos
+
+	// Find the start of the current word
+	wordStart := triggerPos
+	for wordStart > 0 {
+		ch := query[wordStart-1]
+		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' ||
+			ch == ',' || ch == ';' || ch == '(' || ch == ')' ||
+			ch == '=' || ch == '<' || ch == '>' || ch == '+' ||
+			ch == '-' || ch == '*' || ch == '/' || ch == '%' {
+			break
+		}
+		wordStart--
+	}
+
+	// Replace the current word with the suggestion
+	newQuery := query[:wordStart] + suggestion + query[triggerPos:]
+	m.query.SetValue(newQuery)
+
+	// Hide autocomplete
+	m.autocomplete.Visible = false
+}
+
+// Cleanup cancels background operations and prepares for shutdown
+func (m *BrowserModel) Cleanup() {
+	if m.cleanedUp {
+		return
+	}
+	m.cleanedUp = true
+	if m.cancel != nil {
+		m.cancel()
+	}
 }
 
 func (m *BrowserModel) executeQuery() tea.Cmd {
@@ -957,25 +1445,29 @@ func (m *BrowserModel) renderResults() string {
 
 func applyTextAreaStyles(ta *textarea.Model) {
 	s := ta.Styles()
-	bgStyle := lipgloss.NewStyle().Background(styles.BgDark)
 
-	s.Focused.Base = bgStyle
-	s.Focused.Text = lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark)
-	s.Focused.Placeholder = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	s.Focused.LineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	s.Focused.CursorLine = lipgloss.NewStyle().Background(styles.BgLight)
-	s.Focused.CursorLineNumber = lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgLight)
-	s.Focused.EndOfBuffer = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	s.Focused.Prompt = lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgDark)
+	bg := styles.BgDark
+	cursorBg := styles.BgLight
 
-	s.Blurred.Base = bgStyle
-	s.Blurred.Text = lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark)
-	s.Blurred.Placeholder = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	s.Blurred.LineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	s.Blurred.CursorLine = lipgloss.NewStyle().Background(styles.BgDark)
-	s.Blurred.CursorLineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	s.Blurred.EndOfBuffer = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
-	s.Blurred.Prompt = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark)
+	// Focused styles with visible cursor
+	s.Focused.Base = lipgloss.NewStyle().Background(bg)
+	s.Focused.Text = lipgloss.NewStyle().Foreground(styles.Text).Background(bg)
+	s.Focused.Placeholder = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)
+	s.Focused.LineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)
+	s.Focused.CursorLine = lipgloss.NewStyle().Background(cursorBg)
+	s.Focused.CursorLineNumber = lipgloss.NewStyle().Foreground(styles.Primary).Background(cursorBg)
+	s.Focused.EndOfBuffer = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)
+	s.Focused.Prompt = lipgloss.NewStyle().Foreground(styles.Primary).Background(bg)
+
+	// Blurred styles
+	s.Blurred.Base = lipgloss.NewStyle().Background(bg)
+	s.Blurred.Text = lipgloss.NewStyle().Foreground(styles.Text).Background(bg)
+	s.Blurred.Placeholder = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)
+	s.Blurred.LineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)
+	s.Blurred.CursorLine = lipgloss.NewStyle().Background(bg)
+	s.Blurred.CursorLineNumber = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)
+	s.Blurred.EndOfBuffer = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)
+	s.Blurred.Prompt = lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg)
 
 	ta.SetStyles(s)
 }

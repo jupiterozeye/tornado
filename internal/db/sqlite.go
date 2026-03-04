@@ -7,9 +7,10 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"time"
+
 	"github.com/jupiterozeye/tornado/internal/models"
 	_ "modernc.org/sqlite"
-	"time"
 )
 
 // SQLiteDB implements the Database interface for SQLite databases.
@@ -35,6 +36,11 @@ func (s *SQLiteDB) Connect(config models.ConnectionConfig) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// Configure connection pool for faster close/disconnect
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+
 	if err := db.Ping(); err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -45,12 +51,30 @@ func (s *SQLiteDB) Connect(config models.ConnectionConfig) error {
 	return nil
 }
 
-// Disconnect closes the SQLite database connection.
+// Disconnect closes the SQLite database connection with timeout.
 func (s *SQLiteDB) Disconnect() error {
-	if s.db != nil {
-		return s.db.Close()
+	if s.db == nil {
+		return nil
 	}
-	return nil
+
+	// Use a channel to close with timeout
+	done := make(chan error, 1)
+	go func() {
+		done <- s.db.Close()
+	}()
+
+	// Wait for close with timeout
+	select {
+	case err := <-done:
+		s.db = nil
+		s.connected = false
+		return err
+	case <-time.After(2 * time.Second):
+		// Timeout - force close by setting to nil
+		s.db = nil
+		s.connected = false
+		return fmt.Errorf("disconnect timeout: connection may still be active")
+	}
 }
 
 // IsConnected returns whether there's an active connection.

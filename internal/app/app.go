@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/jupiterozeye/tornado/internal/config"
 	"github.com/jupiterozeye/tornado/internal/db"
 	"github.com/jupiterozeye/tornado/internal/ui/screens"
 	"github.com/jupiterozeye/tornado/internal/ui/styles"
@@ -109,11 +110,30 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.getActiveScreen().Init()
 
 	case screens.RequestConnectMsg:
-		if a.db != nil {
-			_ = a.db.Disconnect()
-			a.db = nil
+		// Cancel background operations and grab DB reference before nulling it
+		if a.browserScreen != nil {
+			a.browserScreen.Cleanup()
 		}
-		a.connectScreen = screens.NewConnectModel()
+		oldDB := a.db
+		a.db = nil
+		a.browserScreen = nil
+
+		// Fire-and-forget disconnect outside Bubble Tea's command pipeline.
+		if oldDB != nil {
+			go func() { _ = oldDB.Disconnect() }()
+		}
+
+		// Load connections snapshot RIGHT NOW on the event-loop goroutine.
+		// This is safe because AddQuery's Lock is only held for microseconds,
+		// and we are not inside any lock ourselves here.
+		// Using NewConnectModelWithConnections avoids calling GetConnections
+		// later when a background goroutine might hold the write lock.
+		var connections []config.ConnectionEntry
+		if cfg := config.Get(); cfg != nil {
+			connections = cfg.GetConnections()
+		}
+		a.connectScreen = screens.NewConnectModelWithConnections(connections)
+
 		// Pass current window size to the new connect screen
 		if a.width > 0 && a.height > 0 {
 			a.connectScreen.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
@@ -135,10 +155,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a *App) getActiveScreen() tea.Model {
 	switch a.currentScreen {
-	case ScreenConnect:
-		return a.connectScreen
 	case ScreenBrowser:
-		return a.browserScreen
+		if a.browserScreen != nil {
+			return a.browserScreen
+		}
+		return a.connectScreen
 	default:
 		return a.connectScreen
 	}
@@ -150,9 +171,15 @@ func (a *App) delegateToActiveScreen(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch a.currentScreen {
 	case ScreenConnect:
+		if a.connectScreen == nil {
+			return a, nil
+		}
 		newModel, cmd = a.connectScreen.Update(msg)
 		a.connectScreen = newModel.(*screens.ConnectModel)
 	case ScreenBrowser:
+		if a.browserScreen == nil {
+			return a, nil
+		}
 		newModel, cmd = a.browserScreen.Update(msg)
 		a.browserScreen = newModel.(*screens.BrowserModel)
 	}

@@ -80,7 +80,26 @@ func connectAnimTick() tea.Cmd {
 }
 
 // NewConnectModel creates a new connection screen model.
+// connections should be pre-loaded by the caller to avoid mutex contention
+// on the Bubble Tea event loop goroutine.
 func NewConnectModel() *ConnectModel {
+	// Load connections outside the event loop is safe here (initial startup only).
+	// For disconnect flow, use NewConnectModelWithConnections to avoid deadlock.
+	connections := []config.ConnectionEntry{}
+	if cfg := config.Get(); cfg != nil {
+		connections = cfg.GetConnections()
+	}
+	return newConnectModelFromConnections(connections)
+}
+
+// NewConnectModelWithConnections creates a connect model with pre-loaded connections.
+// Use this when switching screens mid-session to avoid holding config mutex on the
+// event loop goroutine at the same time as background goroutines may hold it.
+func NewConnectModelWithConnections(connections []config.ConnectionEntry) *ConnectModel {
+	return newConnectModelFromConnections(connections)
+}
+
+func newConnectModelFromConnections(connections []config.ConnectionEntry) *ConnectModel {
 	s := styles.Default()
 
 	// Initialize spinner with custom parenthsis spinner
@@ -95,12 +114,6 @@ func NewConnectModel() *ConnectModel {
 	path := textinput.New()
 	path.Placeholder = "/path/to/database.db"
 	path.CharLimit = 256
-
-	// Load connection history
-	connections := []config.ConnectionEntry{}
-	if cfg := config.Get(); cfg != nil {
-		connections = cfg.GetConnections()
-	}
 
 	// Create connection history list
 	var connItems []list.Item
@@ -333,33 +346,34 @@ func (m *ConnectModel) viewWelcome() string {
 }
 
 var tornadoAnimLines = []string{
-	"                          ██████                            ",
-	"          ██████████                          ████████      ",
-	"    ██████████                                    ████████  ",
-	"  ████████      ████                      ██████      ██████",
-	"████████    ████                              ████    ██████",
-	"██████    ████    ██████    ████████    ██      ██████████  ",
-	"  ██████  ████  ████      ████████████    ██  ██████████    ",
-	"    ████████████  ████                  ████████████    ██  ",
-	"        ████  ██████████████████████████████████    ██████  ",
-	"          ████                                  ████████    ",
-	"            ████████    ██████████████████████████████      ",
-	"                  ████████                            ██    ",
-	"              ████      ██████████████████████████████      ",
-	"                ████████        ██████████████              ",
-	"                    ████████████              ██████        ",
-	"                            ██████████████████████          ",
-	"                      ██████                                ",
-	"                        ████████████████████                ",
-	"                      ██      ████████████                  ",
-	"                        ██████                              ",
-	"                          ██████████████                    ",
-	"                      ██      ██████                        ",
-	"                      ██████                                ",
-	"                        ████████████                        ",
-	"                      ██                                    ",
-	"                        ██████                              ",
-	"                          ██                                ",
+	"                                                          ",
+	"        ████░░░░░░░░░░░░░░░░░░▒▒▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓    ",
+	"          ██░░▒▒▒▒░░░░░░░░░░░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒▓▓▓▓▓▓██      ",
+	"          ██▒▒▓▓▓▓▒▒░░░░░░▒▒▓▓▒▒▒▒▒▒▒▒▒▒▒▒▓▓▓▓▓▓░░        ",
+	"            ████▓▓▒▒▒▒░░░░░░░░░░▓▓▒▒▒▒▒▒▒▒▓▓▓▓██          ",
+	"                ██▓▓░░▒▒░░░░░░░░▒▒▒▒▒▒▒▒▓▓▓▓▓▓░░          ",
+	"                ██▒▒▒▒▓▓░░░░░░░░░░▒▒▓▓▓▓▓▓▓▓▓▓            ",
+	"                ██▓▓▓▓▓▓▒▒▒▒░░░░▓▓▓▓▒▒▓▓▓▓▓▓██            ",
+	"                  ██████▓▓▒▒░░░░░░▒▒▓▓▒▒▒▒▓▓██            ",
+	"                      ▓▓██▒▒▒▒░░░░░░▒▒▓▓▓▓▓▓██            ",
+	"                        ██▓▓▓▓░░░░░░▓▓▒▒▒▒▓▓▓▓██░░        ",
+	"                        ▓▓██▓▓▒▒▒▒▒▒░░░░▒▒▓▓▓▓▓▓██        ",
+	"                          ░░██████▓▓▓▓░░░░▒▒▓▓▓▓██        ",
+	"                                ░░▒▒██░░░░▒▒▓▓▓▓██░░      ",
+	"                                    ██▒▒░░░░░░▒▒▓▓██      ",
+	"                                    ▒▒████▒▒▓▓▓▓▓▓██      ",
+	"                                      ░░▒▒██░░▒▒▓▓██░░    ",
+	"                                          ██░░▒▒▒▒▓▓██    ",
+	"                                          ██░░▒▒▓▓▓▓▓▓    ",
+	"                                          ██░░▒▒████      ",
+	"                                      ▓▓██░░▒▒▓▓██        ",
+	"                                      ██░░▓▓▓▓████        ",
+	"                                    ▓▓██░░▒▒▓▓██          ",
+	"                                   ░██░░▒▒▓▓░░            ",
+	"                                   ██▒▒▓▓██               ",
+	"                                  ▓▓▓▓██                  ",
+	"                                ▒▒▓▓██                    ",
+	"                              ░░████                      ",
 }
 
 func (m *ConnectModel) renderTornadoAnimation() string {
@@ -380,7 +394,7 @@ func (m *ConnectModel) renderTornadoAnimation() string {
 			pad = 0
 		}
 		styled := lipgloss.NewStyle().Foreground(styles.TextMuted).Render(line)
-		if i < 2 {
+		if i < 0 {
 			styled = lipgloss.NewStyle().Foreground(styles.Primary).Render(line)
 		}
 		lineOut := strings.Repeat(" ", pad) + styled
