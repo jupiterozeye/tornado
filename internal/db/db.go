@@ -1,7 +1,4 @@
-// This package defines a common interface for database operations, allowing
-// Tornado to work with multiple database backends (SQLite, PostgreSQL, etc.)
-// without the UI code needing to know which database is being used.
-//
+// This package defines a common interface for database operations
 // References:
 //   - https://go.dev/tour/methods/9 (Interfaces)
 //   - https://go.dev/doc/effective_go#interfaces
@@ -60,7 +57,6 @@ type Database interface {
 }
 
 // Open creates a new database connection based on the config type.
-// This is a factory function that returns the appropriate implementation.
 func Open(config models.ConnectionConfig) (Database, error) {
 	switch config.Type {
 	case "sqlite":
