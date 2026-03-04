@@ -312,8 +312,7 @@ func (m *ConnectModel) viewWelcomeBackground() string {
 	fullHelp := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help)
 	content := lipgloss.JoinVertical(lipgloss.Left, fullLogo, anim, fullHelp)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
-		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(styles.BgDefault)))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 func (m *ConnectModel) viewWelcome() string {
@@ -330,8 +329,7 @@ func (m *ConnectModel) viewWelcome() string {
 	fullHelp := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, help)
 	content := lipgloss.JoinVertical(lipgloss.Left, fullLogo, anim, fullHelp)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content,
-		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(styles.BgDefault)))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 var tornadoAnimLines = []string{
@@ -405,6 +403,92 @@ func maxConnectInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// truncateToWidthNoEllipsis truncates a string to fit within width without adding ellipsis
+func truncateToWidthNoEllipsis(s string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	w := lipgloss.Width(s)
+	if w <= width {
+		return s
+	}
+	result := ""
+	for _, r := range s {
+		runeW := lipgloss.Width(string(r))
+		if lipgloss.Width(result)+runeW > width {
+			break
+		}
+		result += string(r)
+	}
+	return result
+}
+
+// spliceLineStyled replaces characters in baseLine starting at column x with overlay content,
+// preserving the overlay's ANSI styling.
+func spliceLineStyled(baseLine, overlay string, x, totalWidth int) string {
+	if x < 0 {
+		x = 0
+	}
+	if x >= totalWidth {
+		return baseLine
+	}
+
+	overlayW := lipgloss.Width(overlay)
+	if overlayW == 0 {
+		return baseLine
+	}
+
+	// Calculate left padding needed to reach position x
+	baseW := lipgloss.Width(baseLine)
+	var leftPart string
+	if baseW <= x {
+		// Base line is shorter than x, pad with spaces
+		leftPart = baseLine + strings.Repeat(" ", x-baseW)
+	} else {
+		// Truncate base line at position x (no ellipsis)
+		leftPart = truncateToWidthNoEllipsis(baseLine, x)
+	}
+
+	// Calculate right part starting after the overlay
+	rightStart := x + overlayW
+	var rightPart string
+	if rightStart < totalWidth {
+		// Get the part of baseLine after the overlay position
+		remaining := getFromWidth(baseLine, rightStart)
+		// Pad or truncate to fill remaining width (no ellipsis)
+		remainingW := lipgloss.Width(remaining)
+		needed := totalWidth - rightStart
+		if remainingW >= needed {
+			rightPart = truncateToWidthNoEllipsis(remaining, needed)
+		} else {
+			rightPart = remaining + strings.Repeat(" ", needed-remainingW)
+		}
+	}
+
+	return leftPart + overlay + rightPart
+}
+
+// getFromWidth returns the substring of s starting at the specified visual width
+func getFromWidth(s string, startWidth int) string {
+	if startWidth <= 0 {
+		return s
+	}
+	result := ""
+	currentWidth := 0
+	for _, r := range s {
+		runeW := lipgloss.Width(string(r))
+		if currentWidth >= startWidth {
+			result += string(r)
+		} else if currentWidth+runeW > startWidth {
+			// This rune spans the boundary, skip it
+			currentWidth += runeW
+		} else {
+			currentWidth += runeW
+		}
+	}
+	return result
 }
 
 func (m *ConnectModel) viewForm() string {
@@ -486,9 +570,9 @@ func placeDialogBottomRight(background, dialog string, width, height int) string
 
 	// Composite the dialog onto the background at position (x, y)
 	baseLines := strings.Split(background, "\n")
-	// Pad base to full height
+	// Pad base to full height with empty lines (no background color)
 	for len(baseLines) < height {
-		baseLines = append(baseLines, strings.Repeat(" ", width))
+		baseLines = append(baseLines, "")
 	}
 
 	for i, dialogLine := range dialogLines {
@@ -496,7 +580,7 @@ func placeDialogBottomRight(background, dialog string, width, height int) string
 		if row >= len(baseLines) {
 			break
 		}
-		baseLines[row] = spliceStringAt(baseLines[row], dialogLine, x, width)
+		baseLines[row] = spliceLineStyled(baseLines[row], dialogLine, x, width)
 	}
 
 	return strings.Join(baseLines, "\n")
