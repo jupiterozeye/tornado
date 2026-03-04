@@ -397,12 +397,12 @@ func (m *ConnectModel) renderTornadoAnimation() string {
 	}
 
 	var (
-		roadFG       = "22"  // dark green grass
-		poleFG       = "94"  // brown wooden pole
-		debrisFG     = "241" // grey debris (matches tornado trail)
-		treeTrunkFG  = "94"  // brown tree trunk
-		treeLeafFG   = "28"  // green leaves
-		houseFG      = "94"  // brown houses
+		roadFG       = "22"      // dark green grass
+		poleFG       = "94"      // brown wooden pole
+		debrisFG     = "241"     // grey debris (matches tornado trail)
+		treeTrunkFG  = "94"      // brown tree trunk
+		treeLeafFG   = "28"      // green leaves
+		houseFG      = "#BA9D8A" // brown houses
 		tornadoStyle = lipgloss.NewStyle().Foreground(styles.TextMuted)
 	)
 
@@ -633,113 +633,151 @@ func (m *ConnectModel) renderTornadoAnimation() string {
 			drawTree(x, dist)
 
 		case houseObstacle:
+			// House colors
+			roofFG := "#4D301B" // dark red roof
+			wallFG := "#BA9D8A" // darker brown walls
+			chimneyFG := "240"  // grey chimney
+			doorFG := "#7F5933" // darker red door
+			bushFG := "28"      // green bush
+
 			// Draw house at this position - wider, better looking
 			drawHouse := func(hx int, hdist float64) {
 				absHDist := math.Abs(hdist)
 				switch {
 				case absHDist < destroyFull:
 					// House collapsing into rubble pile - house colored debris
-					for dx := -5; dx <= 5; dx++ {
+					for dx := -6; dx <= 6; dx++ {
 						for row := roadTop - 3; row <= roadTop; row++ {
 							if (hx+dx+row)%3 != 0 {
-								set(row, hx+dx, '▒', houseFG)
+								set(row, hx+dx, '▒', wallFG)
 							}
 						}
 					}
 				case absHDist < destroyFar:
 					// House damaged - roof falling, walls cracked
 					// Left wall crumbling
-					set(roadTop, hx-4, '█', houseFG)
-					set(roadTop-1, hx-4, '█', houseFG)
-					set(roadTop-2, hx-4, '▓', debrisFG)
+					set(roadTop, hx-5, '█', wallFG)
+					set(roadTop-1, hx-5, '█', wallFG)
+					set(roadTop-2, hx-5, '▓', wallFG)
 					// Right wall
-					set(roadTop, hx+4, '█', houseFG)
-					set(roadTop-1, hx+4, '█', houseFG)
-					set(roadTop-2, hx+4, '▓', houseFG)
+					set(roadTop, hx+5, '█', wallFG)
+					set(roadTop-1, hx+5, '█', wallFG)
+					set(roadTop-2, hx+5, '▓', wallFG)
 					// Floor
-					for dx := -3; dx <= 3; dx++ {
-						set(roadTop, hx+dx, '█', houseFG)
+					for dx := -4; dx <= 4; dx++ {
+						set(roadTop, hx+dx, '█', wallFG)
 					}
 					// Damaged roof with gap
-					set(roadTop-2, hx-3, '▓', houseFG)
-					set(roadTop-2, hx-2, '▓', houseFG)
-					set(roadTop-2, hx, '░', houseFG) // hole
-					set(roadTop-2, hx+2, '▓', houseFG)
-					set(roadTop-2, hx+3, '▓', houseFG)
-					set(roadTop-3, hx-2, '▒', houseFG)
-					set(roadTop-3, hx+2, '▒', houseFG)
-					set(roadTop-3, hx, '╲', houseFG) // falling debris
+					set(roadTop-2, hx-4, '▓', roofFG)
+					set(roadTop-2, hx-3, '▓', roofFG)
+					set(roadTop-2, hx, '░', wallFG) // hole
+					set(roadTop-2, hx+3, '▓', roofFG)
+					set(roadTop-2, hx+4, '▓', roofFG)
+					set(roadTop-3, hx-3, '▒', roofFG)
+					set(roadTop-3, hx+3, '▒', roofFG)
+					set(roadTop-3, hx, '╲', wallFG) // falling debris
+					// Bush on side (also damaged)
+					set(roadTop, hx+6, '▓', bushFG)
 				case absHDist < shakeDist:
-					// House shaking
-					shake := int(math.Sin(m.animT*6+float64(hx)) * (shakeDist - absHDist) / shakeDist)
+					// House under stress - cracks appearing, slight lean, debris falling
+					shake := int(math.Sin(m.animT*8+float64(hx)) * (shakeDist - absHDist) / shakeDist)
 					sx := hx + shake
-					// Wide house with chimney
-					// Roof peak
-					set(roadTop-4, sx-2, '▒', houseFG)
-					set(roadTop-4, sx-1, '▓', houseFG)
-					set(roadTop-4, sx, '▓', houseFG)
-					set(roadTop-4, sx+1, '▓', houseFG)
-					set(roadTop-4, sx+2, '▒', houseFG)
-					// Chimney
-					set(roadTop-5, sx+1, '█', houseFG)
-					set(roadTop-5, sx+2, '█', houseFG)
-					// Roof slope
-					set(roadTop-3, sx-3, '▓', houseFG)
-					set(roadTop-3, sx-2, '▓', houseFG)
-					set(roadTop-3, sx-1, '▓', houseFG)
-					set(roadTop-3, sx, '▓', houseFG)
-					set(roadTop-3, sx+1, '▓', houseFG)
-					set(roadTop-3, sx+2, '▓', houseFG)
-					set(roadTop-3, sx+3, '▓', houseFG)
-					// Walls
+
+					// Roof shaking with slight lean toward tornado
+					leanDir := 1
+					if dist > 0 {
+						leanDir = -1
+					}
+					lean := int((shakeDist - absHDist) / shakeDist * 0.5)
+
+					// Roof peak (shaking, slightly askew)
+					set(roadTop-4, sx-3+leanDir*lean, '▒', roofFG)
+					set(roadTop-4, sx-2+leanDir*lean, '▓', roofFG)
+					set(roadTop-4, sx-1, '▓', roofFG)
+					set(roadTop-4, sx, '▓', roofFG)
+					set(roadTop-4, sx+1, '▓', roofFG)
+					set(roadTop-4, sx+2+leanDir*lean, '▓', roofFG)
+					set(roadTop-4, sx+3+leanDir*lean, '▒', roofFG)
+
+					// Chimney (tilted)
+					set(roadTop-5, sx+2+leanDir*lean, '█', chimneyFG)
+					set(roadTop-5, sx+3+leanDir*lean, '▓', chimneyFG)
+
+					// Roof slope with stress cracks
+					set(roadTop-3, sx-4, '▓', roofFG)
+					set(roadTop-3, sx-3, '▓', roofFG)
+					set(roadTop-3, sx-2, '░', roofFG) // crack
+					set(roadTop-3, sx-1, '▓', roofFG)
+					set(roadTop-3, sx, '▓', roofFG)
+					set(roadTop-3, sx+1, '▓', roofFG)
+					set(roadTop-3, sx+2, '▓', roofFG)
+					set(roadTop-3, sx+3, '░', roofFG) // crack
+					set(roadTop-3, sx+4, '▓', roofFG)
+
+					// Solid front wall with cracks
 					for row := roadTop - 2; row <= roadTop; row++ {
-						set(row, sx-4, '█', houseFG)
-						set(row, sx+4, '█', houseFG)
+						for dx := -4; dx <= 4; dx++ {
+							set(row, sx+dx, '█', wallFG)
+						}
 					}
-					// Floor
-					for dx := -3; dx <= 3; dx++ {
-						set(roadTop, sx+dx, '█', houseFG)
-					}
-					// Windows with frames
-					set(roadTop-2, sx-2, '░', "253")
-					set(roadTop-2, sx+2, '░', "253")
-					// Door with steps
-					set(roadTop-1, sx, '▓', "94")
-					set(roadTop, sx, '▓', "94")
+					// Cracks in wall
+					set(roadTop-1, sx-3, '░', wallFG)
+					set(roadTop-2, sx+3, '░', wallFG)
+
+					// Windows with cracks
+					set(roadTop-2, sx-2, '▒', "240")
+					set(roadTop-2, sx+2, '▒', "240")
+
+					// Door (dark red)
+					set(roadTop-1, sx, '▓', doorFG)
+					set(roadTop, sx, '▓', doorFG)
+
+					// Falling debris from roof
+					debrisY := (int(m.animT*20) % 3)
+					set(roadTop-1-debrisY, sx+5+shake, '╲', roofFG)
+
+					// Bush shaking too
+					bushShake := shake / 2
+					set(roadTop, sx+6+bushShake, '▓', bushFG)
+					set(roadTop, sx+7+bushShake, '▒', bushFG)
 				default:
-					// Intact wide house with chimney
-					// Roof peak
-					set(roadTop-4, hx-2, '▒', houseFG)
-					set(roadTop-4, hx-1, '▓', houseFG)
-					set(roadTop-4, hx, '▓', houseFG)
-					set(roadTop-4, hx+1, '▓', houseFG)
-					set(roadTop-4, hx+2, '▒', houseFG)
-					// Chimney
-					set(roadTop-5, hx+1, '█', houseFG)
-					set(roadTop-5, hx+2, '█', houseFG)
-					// Roof slope
-					set(roadTop-3, hx-3, '▓', houseFG)
-					set(roadTop-3, hx-2, '▓', houseFG)
-					set(roadTop-3, hx-1, '▓', houseFG)
-					set(roadTop-3, hx, '▓', houseFG)
-					set(roadTop-3, hx+1, '▓', houseFG)
-					set(roadTop-3, hx+2, '▓', houseFG)
-					set(roadTop-3, hx+3, '▓', houseFG)
-					// Walls
+					// Intact wide house with chimney and bush
+					// Roof peak (dark red)
+					set(roadTop-4, hx-3, '▒', roofFG)
+					set(roadTop-4, hx-2, '▓', roofFG)
+					set(roadTop-4, hx-1, '▓', roofFG)
+					set(roadTop-4, hx, '▓', roofFG)
+					set(roadTop-4, hx+1, '▓', roofFG)
+					set(roadTop-4, hx+2, '▓', roofFG)
+					set(roadTop-4, hx+3, '▒', roofFG)
+					// Chimney (grey)
+					set(roadTop-5, hx+2, '█', chimneyFG)
+					set(roadTop-5, hx+3, '█', chimneyFG)
+					// Roof slope (dark red)
+					set(roadTop-3, hx-4, '▓', roofFG)
+					set(roadTop-3, hx-3, '▓', roofFG)
+					set(roadTop-3, hx-2, '▓', roofFG)
+					set(roadTop-3, hx-1, '▓', roofFG)
+					set(roadTop-3, hx, '▓', roofFG)
+					set(roadTop-3, hx+1, '▓', roofFG)
+					set(roadTop-3, hx+2, '▓', roofFG)
+					set(roadTop-3, hx+3, '▓', roofFG)
+					set(roadTop-3, hx+4, '▓', roofFG)
+					// Solid front wall (brown)
 					for row := roadTop - 2; row <= roadTop; row++ {
-						set(row, hx-4, '█', houseFG)
-						set(row, hx+4, '█', houseFG)
+						for dx := -4; dx <= 4; dx++ {
+							set(row, hx+dx, '█', wallFG)
+						}
 					}
-					// Floor
-					for dx := -3; dx <= 3; dx++ {
-						set(roadTop, hx+dx, '█', houseFG)
-					}
-					// Windows with frames
+					// Windows (cutouts in solid wall)
 					set(roadTop-2, hx-2, '░', "253")
 					set(roadTop-2, hx+2, '░', "253")
-					// Door with steps
-					set(roadTop-1, hx, '▓', "94")
-					set(roadTop, hx, '▓', "94")
+					// Door (dark red)
+					set(roadTop-1, hx, '▓', doorFG)
+					set(roadTop, hx, '▓', doorFG)
+					// Bush on side
+					set(roadTop, hx+6, '▓', bushFG)
+					set(roadTop, hx+7, '▒', bushFG)
 				}
 			}
 			drawHouse(x, dist)
@@ -807,6 +845,25 @@ func (m *ConnectModel) renderTornadoAnimation() string {
 		}
 		if screenX >= -10 && screenX < m.width+10 {
 			drawObstacle(screenX, houseObstacle, float64(screenX-tornadoGroundX), baseX)
+		}
+	}
+
+	// ── Add tornado fog/debris at ground contact ─────────────────
+	// Create random sporadic dust/debris effect at tornado base
+	fogRunes := []rune{'░', '▒', '▓'}
+	for i := 0; i < 15; i++ {
+		// Random position around tornado base
+		hash := tornadoGroundX*17 + i*31 + int(m.animT*50)
+		if hash < 0 {
+			hash = -hash
+		}
+		dx := (hash % 11) - 5 // -5 to +5
+		dy := hash % 4        // 0 to 3
+		x := tornadoGroundX + dx
+		row := roadTop - dy
+		if x >= 0 && x < m.width && row >= 0 && hash%3 != 0 {
+			r := fogRunes[hash%len(fogRunes)]
+			set(row, x, r, debrisFG)
 		}
 	}
 
