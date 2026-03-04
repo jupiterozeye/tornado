@@ -1087,7 +1087,7 @@ func placeDialogBottomRight(background, dialog string, width, height int) string
 
 	// Position in bottom right with some padding
 	padding := 2
-	x := width - dialogWidth - padding
+	x := width - dialogWidth - padding + 2
 	y := height - dialogHeight - padding
 
 	if x < 0 {
