@@ -1,53 +1,103 @@
 # Tornado
 
-A visually appealing TUI for SQL database viewing and management.
+Tornado is a terminal-first SQL client focused on speed, clarity, and keyboard-driven workflows.
 
-## Features (Planned)
+It gives you a clean TUI for exploring schemas, running queries, filtering results, and switching themes without leaving your terminal.
 
-- Connect to SQLite and PostgreSQL databases
-- Browse tables and schemas
-- Run custom SQL queries
-- View database traffic with real-time charts
+## Features
 
-## Built With
+- SQLite and PostgreSQL support
+- Explorer pane for tables and schema navigation
+- SQL query editor with modal editing
+- Results table with filter mode, preview, and copy actions
+- Theme picker with live preview
+- Persistent config for saved preferences (including theme)
 
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - TUI framework
-- [Bubbles](https://github.com/charmbracelet/bubbles) - UI components
-- [Lip Gloss](https://github.com/charmbracelet/lipgloss) - Styling
-- [ntcharts](https://github.com/NimbleMarkets/ntcharts) - Terminal charts
+## Install
 
-## Quick Start
+### Go install (recommended)
 
 ```bash
-# Install dependencies
+go install github.com/jupiterozeye/tornado@latest
+```
+
+Then run:
+
+```bash
+tornado
+```
+
+If `tornado` is not found, add your Go bin directory to `PATH`:
+
+```bash
+export PATH="$(go env GOPATH)/bin:$PATH"
+```
+
+For Go 1.17+, `GOBIN` may be used instead of `GOPATH/bin` if set.
+
+### Build from source
+
+```bash
+git clone https://github.com/jupiterozeye/tornado
+cd tornado
+make build
+./bin/tornado
+```
+
+## Nix
+
+This repo includes a `flake.nix`.
+
+Run directly:
+
+```bash
+nix run .
+```
+
+Enter development shell:
+
+```bash
+nix develop
+```
+
+Build package:
+
+```bash
+nix build .#tornado
+```
+
+## Quick Usage
+
+- Start Tornado and connect to your database
+- Use the Explorer pane to browse tables
+- Run SQL from the Query pane
+- Inspect, filter (`/`), and copy from the Results pane
+
+## Common Keys
+
+- `space` open command menu
+- `e` focus Explorer
+- `q` focus Query
+- `r` focus Results
+- `ctrl+enter` execute query
+- `t` open theme picker (from command menu)
+- `?` help hints in status/footer
+- `q` quit (from command menu)
+
+## Development
+
+```bash
 make deps
-
-# Run the application
 make run
+make test
 ```
 
-## Project Structure
+## Tech Stack
 
-```
-tornado/
-├── cmd/tornado/          # Application entry point
-├── internal/
-│   ├── app/              # Root model and screen navigation
-│   ├── db/               # Database interface and implementations
-│   ├── models/           # Data structures
-│   ├── ui/               # UI components and screens
-│   └── telemetry/        # Metrics collection
-├── Makefile
-└── README.md
-```
-
-## Key Bindings
-
-| Key | Action |
-|-----|--------|
-| `q` / `Ctrl+C` | Quit |
-| `Tab` | Switch focus |
-| `Enter` | Confirm/Execute |
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea)
+- [Bubbles](https://github.com/charmbracelet/bubbles)
+- [Lip Gloss](https://github.com/charmbracelet/lipgloss)
+- [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)
 
 ## License
 
