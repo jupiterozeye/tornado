@@ -96,6 +96,7 @@ type BrowserModel struct {
 	leaderActive  bool // menu popup is visible
 	themeMenu     bool
 	themeList     list.Model
+	themeOriginal string
 	statusMsg     string
 	maximizedPane Pane
 
@@ -935,8 +936,15 @@ func (m *BrowserModel) executeLeaderCommand(key string) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return RequestConnectMsg{} }
 	case "t":
 		m.themeMenu = true
+		m.themeOriginal = styles.CurrentTheme()
+		for i, t := range styles.AvailableThemes() {
+			if t == m.themeOriginal {
+				m.themeList.Select(i)
+				break
+			}
+		}
 		m.leaderActive = false
-		m.statusMsg = "Select theme and press Enter"
+		m.statusMsg = "Preview with j/k, Enter to save, Esc to cancel"
 		return m, nil
 	case "h", "?":
 		m.statusMsg = "Help: e/q/r focus, space command menu, enter run query in NORMAL"
@@ -952,48 +960,66 @@ func (m *BrowserModel) executeLeaderCommand(key string) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m *BrowserModel) applyTheme(name string) bool {
+	if !styles.SetTheme(name) {
+		return false
+	}
+	m.styles = styles.Default()
+	applyTextAreaStyles(&m.query)
+	applyTableStyles(&m.results)
+	m.updateThemeListStyles()
+	return true
+}
+
 func (m *BrowserModel) handleThemeMenuKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Handle all navigation manually to prevent list's default wrapping
 	switch msg.String() {
 	case "esc":
+		if m.themeOriginal != "" {
+			m.applyTheme(m.themeOriginal)
+		}
 		m.themeMenu = false
+		m.themeOriginal = ""
 		m.statusMsg = ""
 		return m, nil
 	case "enter":
 		if it, ok := m.themeList.SelectedItem().(browserThemeItem); ok {
-			if styles.SetTheme(it.name) {
-				m.styles = styles.Default()
-				applyTextAreaStyles(&m.query)
-				applyTableStyles(&m.results)
-				m.updateThemeListStyles() // Update theme list styles immediately
+			if m.applyTheme(it.name) {
 				m.statusMsg = "Theme: " + it.name
-				// Save theme preference (async)
 				if cfg := config.Get(); cfg != nil {
 					go cfg.SetTheme(it.name)
 				}
 			}
 		}
 		m.themeMenu = false
-		return m, nil
-	case "j", "down":
-		// Manually handle navigation with clamping
-		cursor := m.themeList.Cursor()
-		items := m.themeList.Items()
-		totalItems := len(items)
-		if cursor < totalItems-1 {
-			m.themeList.Select(cursor + 1)
-		}
-		return m, nil
-	case "k", "up":
-		// Manually handle navigation with clamping
-		cursor := m.themeList.Cursor()
-		if cursor > 0 {
-			m.themeList.Select(cursor - 1)
-		}
+		m.themeOriginal = ""
 		return m, nil
 	}
 
-	// Don't pass navigation keys to list to prevent wrapping
-	return m, nil
+	selected := m.themeList.Index()
+	totalItems := len(m.themeList.Items())
+
+	switch msg.String() {
+	case "j", "down", "ctrl+n":
+		if selected < totalItems-1 {
+			m.themeList.Select(selected + 1)
+			if it, ok := m.themeList.SelectedItem().(browserThemeItem); ok {
+				m.applyTheme(it.name)
+			}
+		}
+		return m, nil
+	case "k", "up", "ctrl+p":
+		if selected > 0 {
+			m.themeList.Select(selected - 1)
+			if it, ok := m.themeList.SelectedItem().(browserThemeItem); ok {
+				m.applyTheme(it.name)
+			}
+		}
+		return m, nil
+	default:
+		// Ignore all other keys
+		return m, nil
+	}
 }
 
 func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
@@ -1061,12 +1087,16 @@ func (m *BrowserModel) renderWithThemeMenu(base string) string {
 	// Manually render theme list to ensure proper width and background
 	innerWidth := 22 // 24 - 2 for borders
 	bg := styles.BgDark
-	visibleCount := 10 // Match the height set in New()
 
 	var lines []string
 	themes := styles.AvailableThemes()
 	totalThemes := len(themes)
-	cursor := m.themeList.Cursor()
+	cursor := m.themeList.Index()
+	// Calculate visible count based on available space (max 10)
+	visibleCount := totalThemes
+	if visibleCount > 10 {
+		visibleCount = 10
+	}
 
 	// Calculate viewport to show items around cursor
 	startIdx := 0
