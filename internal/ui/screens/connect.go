@@ -1050,9 +1050,15 @@ func (m *ConnectModel) viewForm() string {
 	}
 
 	// Path input field - wrap with background to prevent terminal color bleeding
-	pathLabel := m.styles.Muted.Render("Database File:")
-	pathValue := lipgloss.NewStyle().Background(styles.BgDark).Render(m.pathInput.View())
-	fields = append(fields, lipgloss.NewStyle().Background(styles.BgDark).Render(pathLabel)+"\n"+pathValue)
+	pathLabel := lipgloss.NewStyle().
+		Background(styles.BgDark).
+		Foreground(styles.TextMuted).
+		Render("Database File:")
+	pathValue := m.pathInput.View()
+	pathSection := lipgloss.NewStyle().
+		Background(styles.BgDark).
+		Render(pathLabel + "\n" + pathValue)
+	fields = append(fields, pathSection)
 
 	if m.errorMsg != "" {
 		fields = append(fields, m.styles.Error.Render(m.truncateError(m.errorMsg, fieldWidth)))

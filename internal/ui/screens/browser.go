@@ -31,9 +31,11 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
@@ -162,10 +164,98 @@ func NewBrowserModel(database db.Database) *BrowserModel {
 	for _, t := range styles.AvailableThemes() {
 		themeItems = append(themeItems, browserThemeItem{name: t})
 	}
-	themeList := list.New(themeItems, list.NewDefaultDelegate(), 36, 12)
-	themeList.Title = "Themes"
+
+	// Create custom delegate with proper background styling
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.NormalTitle = lipgloss.NewStyle().
+		Foreground(styles.Text).
+		Background(styles.BgDark)
+	delegate.Styles.NormalDesc = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
+	delegate.Styles.SelectedTitle = lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Background(styles.BgDark).
+		Bold(true)
+	delegate.Styles.SelectedDesc = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
+	delegate.Styles.DimmedTitle = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
+	delegate.Styles.DimmedDesc = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
+	delegate.Styles.FilterMatch = lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Background(styles.BgDark).
+		Bold(true)
+	// Hide help by setting empty help functions
+	delegate.ShortHelpFunc = func() []key.Binding { return nil }
+	delegate.FullHelpFunc = func() [][]key.Binding { return nil }
+	delegate.SetSpacing(0)
+	delegate.SetHeight(1)
+
+	themeList := list.New(themeItems, delegate, 20, len(themeItems))
 	themeList.SetShowStatusBar(false)
 	themeList.SetFilteringEnabled(false)
+	themeList.SetShowTitle(false) // Hide the internal title since we use the dialog box title
+	// Hide help/navigation commands and spacing
+	themeList.SetShowHelp(false)
+	delegate.SetSpacing(0)
+	// Set proper background styles for the list
+	themeList.Styles.TitleBar = lipgloss.NewStyle().Background(styles.BgDark)
+	themeList.Styles.Title = lipgloss.NewStyle().Background(styles.BgDark)
+	themeList.Styles.Spinner = lipgloss.NewStyle().Background(styles.BgDark)
+	themeList.Styles.Filter = textinput.Styles{
+		Focused: textinput.StyleState{
+			Text:        lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark),
+			Placeholder: lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark),
+			Prompt:      lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgDark),
+		},
+		Blurred: textinput.StyleState{
+			Text:        lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark),
+			Placeholder: lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark),
+			Prompt:      lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgDark),
+		},
+	}
+	themeList.Styles.DefaultFilterCharacterMatch = lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Background(styles.BgDark).
+		Bold(true)
+	themeList.Styles.StatusBar = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
+	themeList.Styles.StatusEmpty = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
+	themeList.Styles.StatusBarActiveFilter = lipgloss.NewStyle().
+		Foreground(styles.Text).
+		Background(styles.BgDark)
+	themeList.Styles.StatusBarFilterCount = lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Background(styles.BgDark)
+	themeList.Styles.NoItems = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
+	themeList.Styles.PaginationStyle = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
+	themeList.Styles.HelpStyle = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
+	themeList.Styles.ActivePaginationDot = lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Background(styles.BgDark)
+	themeList.Styles.InactivePaginationDot = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
+	themeList.Styles.ArabicPagination = lipgloss.NewStyle().
+		Foreground(styles.Text).
+		Background(styles.BgDark)
+	themeList.Styles.DividerDot = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(styles.BgDark)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -874,6 +964,7 @@ func (m *BrowserModel) handleThemeMenuKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 				m.styles = styles.Default()
 				applyTextAreaStyles(&m.query)
 				applyTableStyles(&m.results)
+				m.updateThemeListStyles() // Update theme list styles immediately
 				m.statusMsg = "Theme: " + it.name
 				// Save theme preference (async)
 				if cfg := config.Get(); cfg != nil {
@@ -883,11 +974,26 @@ func (m *BrowserModel) handleThemeMenuKey(msg tea.KeyPressMsg) (tea.Model, tea.C
 		}
 		m.themeMenu = false
 		return m, nil
+	case "j", "down":
+		// Manually handle navigation with clamping
+		cursor := m.themeList.Cursor()
+		items := m.themeList.Items()
+		totalItems := len(items)
+		if cursor < totalItems-1 {
+			m.themeList.Select(cursor + 1)
+		}
+		return m, nil
+	case "k", "up":
+		// Manually handle navigation with clamping
+		cursor := m.themeList.Cursor()
+		if cursor > 0 {
+			m.themeList.Select(cursor - 1)
+		}
+		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.themeList, cmd = m.themeList.Update(msg)
-	return m, cmd
+	// Don't pass navigation keys to list to prevent wrapping
+	return m, nil
 }
 
 func (m *BrowserModel) handleExplorerActionKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
@@ -952,12 +1058,54 @@ func (m *BrowserModel) renderWithLeaderMenu(base string) string {
 
 // renderWithThemeMenu uses lipgloss compositing to overlay the theme menu centered
 func (m *BrowserModel) renderWithThemeMenu(base string) string {
-	lines := strings.Split(m.themeList.View(), "\n")
-	menu := renderDialogBox("Themes", lines, "enter Select · esc Cancel", 44)
+	// Manually render theme list to ensure proper width and background
+	innerWidth := 22 // 24 - 2 for borders
+	bg := styles.BgDark
+	visibleCount := 10 // Match the height set in New()
+
+	var lines []string
+	themes := styles.AvailableThemes()
+	totalThemes := len(themes)
+	cursor := m.themeList.Cursor()
+
+	// Calculate viewport to show items around cursor
+	startIdx := 0
+	if cursor >= visibleCount {
+		startIdx = cursor - visibleCount + 1
+	}
+	endIdx := startIdx + visibleCount
+	if endIdx > totalThemes {
+		endIdx = totalThemes
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		theme := themes[i]
+		// Determine style based on selection
+		var style lipgloss.Style
+		if i == cursor {
+			style = lipgloss.NewStyle().
+				Foreground(styles.Primary).
+				Background(bg).
+				Bold(true)
+		} else {
+			style = lipgloss.NewStyle().
+				Foreground(styles.Text).
+				Background(bg)
+		}
+
+		// Render theme name and pad to fill width
+		themeWidth := lipgloss.Width(theme)
+		if themeWidth < innerWidth {
+			theme = theme + strings.Repeat(" ", innerWidth-themeWidth)
+		}
+		lines = append(lines, style.Render(theme))
+	}
+
+	menu := renderDialogBox("Themes", lines, "", 24)
 
 	// Center position
 	boxH := len(strings.Split(menu, "\n"))
-	boxW := 44
+	boxW := 24
 	x := (m.width - boxW) / 2
 	y := (m.height - boxH) / 2
 	if x < 0 {
@@ -2103,7 +2251,8 @@ func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
 
 	// Get available width from pane dimensions
 	_, _, _, _, rw, _ := m.paneDimensions()
-	availableWidth := rw - 6 // Account for borders and padding
+	// Use full pane width minus minimal borders (2 chars for box borders)
+	availableWidth := rw - 2
 	if availableWidth < 20 {
 		availableWidth = 20
 	}
@@ -2203,7 +2352,24 @@ func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
 	tableParts = append(tableParts, header)
 	tableParts = append(tableParts, rows...)
 
-	return lipgloss.NewStyle().Background(bg).Render(strings.Join(tableParts, "\n"))
+	// Calculate total visible width
+	visibleWidth = 0
+	for i := m.resultsScrollCol; i < endCol && i < len(colWidths); i++ {
+		visibleWidth += colWidths[i]
+	}
+
+	// Ensure each row fills the full available width
+	rowStyle := lipgloss.NewStyle().Background(bg)
+	for i := 0; i < len(tableParts); i++ {
+		// Extend each row to fill available width
+		tableParts[i] = rowStyle.Width(availableWidth).Render(tableParts[i])
+	}
+
+	// Wrap entire table in background to prevent any terminal bleed
+	return lipgloss.NewStyle().
+		Background(bg).
+		Width(availableWidth).
+		Render(strings.Join(tableParts, "\n"))
 }
 
 func applyTextAreaStyles(ta *textarea.Model) {
@@ -2247,4 +2413,97 @@ func applyTableStyles(t *table.Model) {
 		Cell:     lipgloss.NewStyle().Padding(0, 1).Background(bg).Foreground(styles.Text),
 		Selected: lipgloss.NewStyle().Foreground(selectedFg).Bold(true).Background(selectedBg).Padding(0, 1),
 	})
+}
+
+// updateThemeListStyles updates the theme list styles to match current theme
+func (m *BrowserModel) updateThemeListStyles() {
+	bg := styles.BgDark
+
+	// Update delegate styles
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.NormalTitle = lipgloss.NewStyle().
+		Foreground(styles.Text).
+		Background(bg)
+	delegate.Styles.NormalDesc = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
+	delegate.Styles.SelectedTitle = lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Background(bg).
+		Bold(true)
+	delegate.Styles.SelectedDesc = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
+	delegate.Styles.DimmedTitle = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
+	delegate.Styles.DimmedDesc = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
+	delegate.Styles.FilterMatch = lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Background(bg).
+		Bold(true)
+
+	// Hide help by setting empty help functions and spacing
+	delegate.ShortHelpFunc = func() []key.Binding { return nil }
+	delegate.FullHelpFunc = func() [][]key.Binding { return nil }
+	delegate.SetSpacing(0)
+	delegate.SetHeight(1)
+
+	m.themeList.SetDelegate(delegate)
+
+	// Update list styles
+	m.themeList.Styles.TitleBar = lipgloss.NewStyle().Background(bg)
+	m.themeList.Styles.Title = lipgloss.NewStyle().Background(bg)
+	m.themeList.Styles.Spinner = lipgloss.NewStyle().Background(bg)
+	m.themeList.Styles.Filter = textinput.Styles{
+		Focused: textinput.StyleState{
+			Text:        lipgloss.NewStyle().Foreground(styles.Text).Background(bg),
+			Placeholder: lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg),
+			Prompt:      lipgloss.NewStyle().Foreground(styles.Primary).Background(bg),
+		},
+		Blurred: textinput.StyleState{
+			Text:        lipgloss.NewStyle().Foreground(styles.Text).Background(bg),
+			Placeholder: lipgloss.NewStyle().Foreground(styles.TextMuted).Background(bg),
+			Prompt:      lipgloss.NewStyle().Foreground(styles.Primary).Background(bg),
+		},
+	}
+	m.themeList.Styles.DefaultFilterCharacterMatch = lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Background(bg).
+		Bold(true)
+	m.themeList.Styles.StatusBar = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
+	m.themeList.Styles.StatusEmpty = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
+	m.themeList.Styles.StatusBarActiveFilter = lipgloss.NewStyle().
+		Foreground(styles.Text).
+		Background(bg)
+	m.themeList.Styles.StatusBarFilterCount = lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Background(bg)
+	m.themeList.Styles.NoItems = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
+	m.themeList.Styles.PaginationStyle = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
+	m.themeList.Styles.HelpStyle = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
+	m.themeList.Styles.ActivePaginationDot = lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Background(bg)
+	m.themeList.Styles.InactivePaginationDot = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
+	m.themeList.Styles.ArabicPagination = lipgloss.NewStyle().
+		Foreground(styles.Text).
+		Background(bg)
+	m.themeList.Styles.DividerDot = lipgloss.NewStyle().
+		Foreground(styles.TextMuted).
+		Background(bg)
 }

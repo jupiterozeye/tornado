@@ -32,10 +32,16 @@ func renderDialogBox(title string, body []string, subtitle string, width int) st
 	for _, entry := range body {
 		subLines := strings.Split(entry, "\n")
 		for _, line := range subLines {
+			lineWidth := lipgloss.Width(line)
+			// Pad line to fill inner width with spaces that have proper background
+			if lineWidth < innerWidth {
+				padding := lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", innerWidth-lineWidth))
+				line = line + padding
+			}
 			line = truncateString(line, innerWidth)
-			// Ensure line has background by wrapping it
-			lineWithBg := lipgloss.NewStyle().Background(bg).Render(line)
-			out = append(out, borderStyle.Render("│")+bodyStyle.Render(lineWithBg)+borderStyle.Render("│"))
+			// Render with background
+			renderedLine := bodyStyle.Render(line)
+			out = append(out, borderStyle.Render("│")+renderedLine+borderStyle.Render("│"))
 		}
 	}
 
