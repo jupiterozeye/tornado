@@ -111,10 +111,24 @@ func newConnectModelFromConnections(connections []config.ConnectionEntry) *Conne
 	}
 	sp.Style = lipgloss.NewStyle().Foreground(styles.Primary)
 
-	// Initialize form fields
+	// Initialize form fields with proper background styling
 	path := textinput.New()
 	path.Placeholder = "/path/to/database.db"
 	path.CharLimit = 256
+	// Set background color to prevent terminal color bleeding
+	pathStyles := textinput.Styles{
+		Focused: textinput.StyleState{
+			Text:        lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark),
+			Placeholder: lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark),
+			Prompt:      lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgDark),
+		},
+		Blurred: textinput.StyleState{
+			Text:        lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark),
+			Placeholder: lipgloss.NewStyle().Foreground(styles.TextMuted).Background(styles.BgDark),
+			Prompt:      lipgloss.NewStyle().Foreground(styles.Primary).Background(styles.BgDark),
+		},
+	}
+	path.SetStyles(pathStyles)
 
 	// Create connection history list
 	var connItems []list.Item
@@ -1035,10 +1049,10 @@ func (m *ConnectModel) viewForm() string {
 		fields = append(fields, "")
 	}
 
-	// Path input field - just show the input without extra borders
+	// Path input field - wrap with background to prevent terminal color bleeding
 	pathLabel := m.styles.Muted.Render("Database File:")
-	pathValue := m.pathInput.View()
-	fields = append(fields, pathLabel+"\n"+pathValue)
+	pathValue := lipgloss.NewStyle().Background(styles.BgDark).Render(m.pathInput.View())
+	fields = append(fields, lipgloss.NewStyle().Background(styles.BgDark).Render(pathLabel)+"\n"+pathValue)
 
 	if m.errorMsg != "" {
 		fields = append(fields, m.styles.Error.Render(m.truncateError(m.errorMsg, fieldWidth)))

@@ -17,11 +17,13 @@ func renderDialogBox(title string, body []string, subtitle string, width int) st
 	}
 
 	innerWidth := width - 2
+	bg := styles.BgDark
 	borderStyle := lipgloss.NewStyle().
 		Foreground(styles.BorderFocus).
-		Background(styles.BgDark)
+		Background(bg)
 	bodyStyle := lipgloss.NewStyle().
-		Background(styles.BgDark).
+		Background(bg).
+		Foreground(styles.Text).
 		Width(innerWidth)
 
 	out := make([]string, 0, len(body)*3+2)
@@ -31,7 +33,9 @@ func renderDialogBox(title string, body []string, subtitle string, width int) st
 		subLines := strings.Split(entry, "\n")
 		for _, line := range subLines {
 			line = truncateString(line, innerWidth)
-			out = append(out, borderStyle.Render("│")+bodyStyle.Render(line)+borderStyle.Render("│"))
+			// Ensure line has background by wrapping it
+			lineWithBg := lipgloss.NewStyle().Background(bg).Render(line)
+			out = append(out, borderStyle.Render("│")+bodyStyle.Render(lineWithBg)+borderStyle.Render("│"))
 		}
 	}
 

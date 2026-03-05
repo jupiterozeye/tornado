@@ -98,15 +98,17 @@ type BrowserModel struct {
 	maximizedPane Pane
 
 	// Query results
-	currentResults   *models.QueryResult
-	filteredResults  *models.QueryResult // For filtered view
-	queryError       string
-	resultsFilter    string // Fuzzy filter text
-	resultsCursorCol int    // Selected column in results table
-	showPreview      bool   // Preview popup visible
-	previewContent   string // Content to preview
-	previewTitle     string // Title for preview popup
-	showCopyMenu     bool   // Copy menu popup visible
+	currentResults      *models.QueryResult
+	filteredResults     *models.QueryResult // For filtered view
+	queryError          string
+	resultsFilter       string // Fuzzy filter text
+	resultsFilterActive bool   // Filter input mode active
+	resultsCursorCol    int    // Selected column in results table
+	resultsScrollCol    int    // Horizontal scroll offset for table
+	showPreview         bool   // Preview popup visible
+	previewContent      string // Content to preview
+	previewTitle        string // Title for preview popup
+	showCopyMenu        bool   // Copy menu popup visible
 
 	// Autocomplete
 	autocomplete *AutocompleteModel
@@ -370,7 +372,9 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.queryError = ""
 			m.currentResults = msg.Result
-			m.resultsCursorCol = 0 // Reset column cursor for new results
+			m.resultsCursorCol = 0        // Reset column cursor for new results
+			m.resultsScrollCol = 0        // Reset horizontal scroll
+			m.resultsFilterActive = false // Exit filter mode
 			m.updateResultsTable()
 		}
 		m.focusedPane = PaneResults
@@ -633,24 +637,16 @@ func (m *BrowserModel) renderContextFooter() string {
 			text = "Query NORMAL: i Insert  a Append  v Visual  V Visual Line  Enter Execute"
 		}
 	case PaneResults:
-		if m.resultsFilter != "" {
+		if m.resultsFilterActive {
+			text = fmt.Sprintf("Filter: %s_ | Esc to clear", m.resultsFilter)
+		} else if m.resultsFilter != "" {
 			text = fmt.Sprintf("Filter: '%s' | Esc to clear", m.resultsFilter)
 		} else if m.showPreview {
 			text = "Preview: Esc or q to close"
 		} else if m.showCopyMenu {
 			text = "Copy Menu: c Cell, y Row, a All, e Export, Esc Cancel"
 		} else {
-			// Show current column position
-			cols := m.results.Columns()
-			colName := ""
-			if m.resultsCursorCol >= 0 && m.resultsCursorCol < len(cols) {
-				colName = cols[m.resultsCursorCol].Title
-			}
-			if colName != "" {
-				text = fmt.Sprintf("Results: h/l Col(%s)  j/k Row  v Preview  d Delete  y Copy  / Filter  x Clear", colName)
-			} else {
-				text = "Results: h/l Col  j/k Row  v Preview  d Delete  y Copy  / Filter  x Clear"
-			}
+			text = "Results: h/l Col  j/k Row  v Preview  d Delete  y Copy  / Filter  x Clear"
 		}
 	}
 
@@ -1586,6 +1582,10 @@ func (m *BrowserModel) handleResultsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 		// Move left (previous column)
 		if m.resultsCursorCol > 0 {
 			m.resultsCursorCol--
+			// Auto-scroll if needed
+			if m.resultsCursorCol < m.resultsScrollCol {
+				m.resultsScrollCol = m.resultsCursorCol
+			}
 		}
 		return m, nil
 	case "l", "right":
@@ -1602,9 +1602,17 @@ func (m *BrowserModel) handleResultsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 	case "/":
 		// Filter: start fuzzy filtering
 		m.resultsFilter = ""
+		m.resultsFilterActive = true
 		m.statusMsg = "Filter: type to search, esc to clear"
 		return m, nil
 	case "esc":
+		if m.resultsFilterActive {
+			m.resultsFilterActive = false
+			m.resultsFilter = ""
+			m.applyFilter()
+			m.statusMsg = ""
+			return m, nil
+		}
 		if m.resultsFilter != "" {
 			m.resultsFilter = ""
 			m.applyFilter()
@@ -1631,12 +1639,20 @@ func (m *BrowserModel) handleResultsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 		m.results.MoveUp(10)
 		return m, nil
 	default:
-		// Handle filter input
-		if m.statusMsg == "Filter: type to search, esc to clear" {
-			if msg.String() == "backspace" && len(m.resultsFilter) > 0 {
-				m.resultsFilter = m.resultsFilter[:len(m.resultsFilter)-1]
-			} else if len(msg.String()) == 1 {
-				m.resultsFilter += msg.String()
+		// Handle filter input when in filter mode
+		if m.resultsFilterActive {
+			switch msg.String() {
+			case "backspace", "ctrl+h":
+				if len(m.resultsFilter) > 0 {
+					m.resultsFilter = m.resultsFilter[:len(m.resultsFilter)-1]
+				}
+			case "space":
+				m.resultsFilter += " "
+			default:
+				// Only add printable characters
+				if len(msg.String()) == 1 && msg.String()[0] >= 32 && msg.String()[0] < 127 {
+					m.resultsFilter += msg.String()
+				}
 			}
 			m.applyFilter()
 			return m, nil
@@ -1767,7 +1783,9 @@ func (m *BrowserModel) clearResults() {
 	m.currentResults = nil
 	m.filteredResults = nil
 	m.resultsFilter = ""
+	m.resultsFilterActive = false
 	m.resultsCursorCol = 0
+	m.resultsScrollCol = 0
 	m.results.SetRows([]table.Row{})
 	m.results.SetColumns([]table.Column{})
 	m.statusMsg = "Results cleared"
@@ -2013,8 +2031,8 @@ func (m *BrowserModel) renderResults() string {
 		Width(m.width - 4).
 		Render(infoText)
 
-	// Wrap table view in background style
-	tableView := lipgloss.NewStyle().Background(bg).Render(m.results.View())
+	// Render table with column highlighting
+	tableView := m.renderTableWithColumnHighlight(bg)
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -2024,6 +2042,168 @@ func (m *BrowserModel) renderResults() string {
 
 	// Ensure the entire content area has background color
 	return lipgloss.NewStyle().Background(bg).Render(content)
+}
+
+// renderTableWithColumnHighlight renders the table with the current column highlighted
+func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
+	if m.currentResults == nil || len(m.currentResults.Columns) == 0 {
+		return ""
+	}
+
+	// Get current cursor position
+	cursorRow := m.results.Cursor()
+	cursorCol := m.resultsCursorCol
+
+	// Ensure cursorCol is valid
+	if cursorCol < 0 {
+		cursorCol = 0
+	}
+	if cursorCol >= len(m.currentResults.Columns) {
+		cursorCol = len(m.currentResults.Columns) - 1
+	}
+
+	// Define styles
+	headerStyle := lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Bold(true).
+		Background(bg).
+		Padding(0, 1)
+
+	cellStyle := lipgloss.NewStyle().
+		Background(bg).
+		Foreground(styles.Text).
+		Padding(0, 1)
+
+	selectedRowStyle := lipgloss.NewStyle().
+		Foreground(styles.TextBold).
+		Bold(true).
+		Background(lipgloss.Color("240")).
+		Padding(0, 1)
+
+	selectedCellStyle := lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Bold(true).
+		Background(lipgloss.Color("238")).
+		Padding(0, 1)
+
+	// Calculate column widths
+	colWidths := make([]int, len(m.currentResults.Columns))
+	for i, col := range m.currentResults.Columns {
+		colWidths[i] = lipgloss.Width(col) + 2 // +2 for padding
+		if colWidths[i] < 12 {
+			colWidths[i] = 12 // Minimum width
+		}
+	}
+
+	// Calculate total table width
+	totalWidth := 0
+	for _, w := range colWidths {
+		totalWidth += w
+	}
+
+	// Get available width from pane dimensions
+	_, _, _, _, rw, _ := m.paneDimensions()
+	availableWidth := rw - 6 // Account for borders and padding
+	if availableWidth < 20 {
+		availableWidth = 20
+	}
+
+	// Auto-scroll horizontally to keep cursor in view
+	if cursorCol >= m.resultsScrollCol {
+		// Check if cursor is beyond visible area
+		visibleWidth := 0
+		for i := m.resultsScrollCol; i <= cursorCol && i < len(colWidths); i++ {
+			visibleWidth += colWidths[i]
+		}
+		// If cursor column exceeds available width, scroll right
+		for visibleWidth > availableWidth && m.resultsScrollCol < cursorCol {
+			visibleWidth -= colWidths[m.resultsScrollCol]
+			m.resultsScrollCol++
+		}
+	}
+
+	// Find end column for visible area
+	endCol := m.resultsScrollCol
+	visibleWidth := 0
+	for i := m.resultsScrollCol; i < len(colWidths); i++ {
+		if visibleWidth+colWidths[i] > availableWidth && i > m.resultsScrollCol {
+			break
+		}
+		visibleWidth += colWidths[i]
+		endCol = i + 1
+	}
+
+	// Build header - only show visible columns
+	var headerParts []string
+	for i := m.resultsScrollCol; i < endCol && i < len(m.currentResults.Columns); i++ {
+		colName := truncateString(m.currentResults.Columns[i], colWidths[i]-2)
+		headerParts = append(headerParts, headerStyle.Width(colWidths[i]).Render(colName))
+	}
+	header := lipgloss.NewStyle().Background(bg).Render(strings.Join(headerParts, ""))
+
+	// Build rows
+	var rows []string
+	startIdx := 0
+	endIdx := len(m.currentResults.Rows)
+
+	// Only show visible rows (respect viewport)
+	visibleHeight := m.results.Height()
+	if visibleHeight > 0 && endIdx > visibleHeight {
+		startIdx = cursorRow - visibleHeight/2
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		endIdx = startIdx + visibleHeight
+		if endIdx > len(m.currentResults.Rows) {
+			endIdx = len(m.currentResults.Rows)
+			startIdx = endIdx - visibleHeight
+			if startIdx < 0 {
+				startIdx = 0
+			}
+		}
+	}
+
+	for rowIdx := startIdx; rowIdx < endIdx && rowIdx < len(m.currentResults.Rows); rowIdx++ {
+		row := m.currentResults.Rows[rowIdx]
+		var cellParts []string
+
+		// Only render visible columns
+		for colIdx := m.resultsScrollCol; colIdx < endCol && colIdx < len(m.currentResults.Columns); colIdx++ {
+			if colIdx >= len(row) {
+				continue
+			}
+			val := row[colIdx]
+			if val == nil {
+				val = "NULL"
+			}
+			cellStr := fmt.Sprintf("%v", val)
+			cellStr = truncateString(cellStr, colWidths[colIdx]-2)
+
+			// Apply appropriate style
+			if rowIdx == cursorRow {
+				if colIdx == cursorCol {
+					// Selected cell (intersection of row and column)
+					cellParts = append(cellParts, selectedCellStyle.Width(colWidths[colIdx]).Render(cellStr))
+				} else {
+					// Other cells in selected row
+					cellParts = append(cellParts, selectedRowStyle.Width(colWidths[colIdx]).Render(cellStr))
+				}
+			} else {
+				// Normal cell
+				cellParts = append(cellParts, cellStyle.Width(colWidths[colIdx]).Render(cellStr))
+			}
+		}
+
+		rowStr := lipgloss.NewStyle().Background(bg).Render(strings.Join(cellParts, ""))
+		rows = append(rows, rowStr)
+	}
+
+	// Combine everything
+	var tableParts []string
+	tableParts = append(tableParts, header)
+	tableParts = append(tableParts, rows...)
+
+	return lipgloss.NewStyle().Background(bg).Render(strings.Join(tableParts, "\n"))
 }
 
 func applyTextAreaStyles(ta *textarea.Model) {
