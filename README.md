@@ -1,69 +1,33 @@
+<div align="center">
+
 # Tornado
 
-Tornado is a terminal-first SQL client focused on speed, clarity, and keyboard-driven workflows.
+[![Release](https://img.shields.io/github/v/release/jupiterozeye/tornado?style=flat-square)](https://github.com/jupiterozeye/tornado/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jupiterozeye/tornado)](https://goreportcard.com/report/github.com/jupiterozeye/tornado)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/jupiterozeye/tornado?style=flat-square)](go.mod)
+[![License](https://img.shields.io/github/license/jupiterozeye/tornado?style=flat-square)](LICENSE)
 
-It gives you a clean TUI for exploring schemas, running queries, filtering results, and switching themes without leaving your terminal.
+</div>
 
-## Features
+<!-- TODO: Add GIF demo here -->
+<!-- ![Demo](docs/demo.gif) -->
 
-- SQLite and PostgreSQL support
-- Explorer pane for tables and schema navigation
-- SQL query editor with modal editing
-- Results table with filter mode, preview, and copy actions
-- Theme picker with live preview
-- Persistent config for saved preferences (including theme)
+## Installation
 
-## Install
-
-### Go install (recommended)
-
+**Go:**
 ```bash
-go install github.com/jupiterozeye/tornado@latest
+go install github.com/jupiterozeye/tornado/cmd/tornado@latest
 ```
 
-Then run:
+**Nix (flake):**
+```bash
+nix run github:jupiterozeye/tornado
+```
+
+## Usage
 
 ```bash
 tornado
-```
-
-If `tornado` is not found, add your Go bin directory to `PATH`:
-
-```bash
-export PATH="$(go env GOPATH)/bin:$PATH"
-```
-
-For Go 1.17+, `GOBIN` may be used instead of `GOPATH/bin` if set.
-
-### Build from source
-
-```bash
-git clone https://github.com/jupiterozeye/tornado
-cd tornado
-make build
-./bin/tornado
-```
-
-## Nix
-
-This repo includes a `flake.nix`.
-
-Run directly:
-
-```bash
-nix run .
-```
-
-Enter development shell:
-
-```bash
-nix develop
-```
-
-Build package:
-
-```bash
-nix build .#tornado
 ```
 
 ## Quick Usage

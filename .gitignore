@@ -24,3 +24,4 @@ debug.log
 *.sqlite3
 # Temp files
 tmp/
+result/
