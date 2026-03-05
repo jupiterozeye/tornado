@@ -38,6 +38,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/jupiterozeye/tornado/internal/config"
@@ -420,6 +421,12 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// When filtering results, route all keys to filter input/navigation.
+		// This prevents global shortcuts (e/q/r/space...) from hijacking typing.
+		if m.focusedPane == PaneResults && m.resultsFilterActive {
+			return m.handleResultsKey(msg)
+		}
+
 		// Global key bindings (only processed when NOT in INSERT mode)
 		switch msg.String() {
 		case "space":
@@ -466,6 +473,8 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resultsCursorCol = 0        // Reset column cursor for new results
 			m.resultsScrollCol = 0        // Reset horizontal scroll
 			m.resultsFilterActive = false // Exit filter mode
+			m.resultsFilter = ""
+			m.filteredResults = nil
 			m.updateResultsTable()
 		}
 		m.focusedPane = PaneResults
@@ -811,10 +820,28 @@ func (m *BrowserModel) handleCopyCommand(key string) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m *BrowserModel) activeResultSet() *models.QueryResult {
+	if m.currentResults == nil {
+		return nil
+	}
+	if m.resultsFilter != "" && m.filteredResults != nil {
+		return m.filteredResults
+	}
+	return m.currentResults
+}
+
+func (m *BrowserModel) writeClipboard(value string) bool {
+	if err := clipboard.WriteAll(value); err != nil {
+		m.statusMsg = "Clipboard failed: " + err.Error()
+		return false
+	}
+	return true
+}
+
 // copyCell copies the currently selected cell to clipboard
 func (m *BrowserModel) copyCell() (tea.Model, tea.Cmd) {
 	row := m.results.SelectedRow()
-	if row == nil || m.currentResults == nil {
+	if row == nil || m.activeResultSet() == nil {
 		m.statusMsg = "No cell selected"
 		return m, nil
 	}
@@ -826,8 +853,10 @@ func (m *BrowserModel) copyCell() (tea.Model, tea.Cmd) {
 	}
 
 	value := fmt.Sprintf("%v", row[colIdx])
-	// Store in yank buffer and print to terminal (OSC52 not available in bubbletea v2)
 	m.yankBuffer = value
+	if !m.writeClipboard(value) {
+		return m, nil
+	}
 	displayValue := value
 	if len(displayValue) > 30 {
 		displayValue = displayValue[:27] + "..."
@@ -850,13 +879,17 @@ func (m *BrowserModel) copyRow() (tea.Model, tea.Cmd) {
 	}
 	value := strings.Join(values, "\t")
 	m.yankBuffer = value
-	m.statusMsg = "Copied row to buffer"
+	if !m.writeClipboard(value) {
+		return m, nil
+	}
+	m.statusMsg = "Copied row to clipboard"
 	return m, nil
 }
 
 // copyAll copies all results to clipboard
 func (m *BrowserModel) copyAll() (tea.Model, tea.Cmd) {
-	if m.currentResults == nil {
+	active := m.activeResultSet()
+	if active == nil {
 		m.statusMsg = "No results to copy"
 		return m, nil
 	}
@@ -864,10 +897,10 @@ func (m *BrowserModel) copyAll() (tea.Model, tea.Cmd) {
 	var lines []string
 
 	// Add header
-	lines = append(lines, strings.Join(m.currentResults.Columns, "\t"))
+	lines = append(lines, strings.Join(active.Columns, "\t"))
 
 	// Add rows
-	for _, row := range m.currentResults.Rows {
+	for _, row := range active.Rows {
 		var values []string
 		for _, cell := range row {
 			values = append(values, fmt.Sprintf("%v", cell))
@@ -877,7 +910,10 @@ func (m *BrowserModel) copyAll() (tea.Model, tea.Cmd) {
 
 	value := strings.Join(lines, "\n")
 	m.yankBuffer = value
-	m.statusMsg = fmt.Sprintf("Copied %d rows to buffer", len(m.currentResults.Rows))
+	if !m.writeClipboard(value) {
+		return m, nil
+	}
+	m.statusMsg = fmt.Sprintf("Copied %d rows to clipboard", len(active.Rows))
 	return m, nil
 }
 
@@ -1744,6 +1780,31 @@ func minInt(a, b int) int {
 
 // handleResultsKey handles keys when Results pane is focused
 func (m *BrowserModel) handleResultsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.resultsFilterActive {
+		switch msg.String() {
+		case "esc":
+			m.resultsFilterActive = false
+			m.resultsFilter = ""
+			m.applyFilter()
+			m.statusMsg = ""
+			return m, nil
+		case "enter":
+			m.resultsFilterActive = false
+			return m, nil
+		case "backspace", "ctrl+h":
+			r := []rune(m.resultsFilter)
+			if len(r) > 0 {
+				m.resultsFilter = string(r[:len(r)-1])
+			}
+		default:
+			if len(msg.Text) > 0 {
+				m.resultsFilter += msg.Text
+			}
+		}
+		m.applyFilter()
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "v":
 		// Preview: show selected cell value
@@ -1778,19 +1839,12 @@ func (m *BrowserModel) handleResultsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 		m.clearResults()
 		return m, nil
 	case "/":
-		// Filter: start fuzzy filtering
+		// Filter: start filtering
 		m.resultsFilter = ""
 		m.resultsFilterActive = true
 		m.statusMsg = "Filter: type to search, esc to clear"
 		return m, nil
 	case "esc":
-		if m.resultsFilterActive {
-			m.resultsFilterActive = false
-			m.resultsFilter = ""
-			m.applyFilter()
-			m.statusMsg = ""
-			return m, nil
-		}
 		if m.resultsFilter != "" {
 			m.resultsFilter = ""
 			m.applyFilter()
@@ -1817,24 +1871,6 @@ func (m *BrowserModel) handleResultsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 		m.results.MoveUp(10)
 		return m, nil
 	default:
-		// Handle filter input when in filter mode
-		if m.resultsFilterActive {
-			switch msg.String() {
-			case "backspace", "ctrl+h":
-				if len(m.resultsFilter) > 0 {
-					m.resultsFilter = m.resultsFilter[:len(m.resultsFilter)-1]
-				}
-			case "space":
-				m.resultsFilter += " "
-			default:
-				// Only add printable characters
-				if len(msg.String()) == 1 && msg.String()[0] >= 32 && msg.String()[0] < 127 {
-					m.resultsFilter += msg.String()
-				}
-			}
-			m.applyFilter()
-			return m, nil
-		}
 		// Pass other keys to table for default navigation
 		var cmd tea.Cmd
 		m.results, cmd = m.results.Update(msg)
@@ -1845,13 +1881,14 @@ func (m *BrowserModel) handleResultsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 
 // showPreviewDialog shows a preview of the selected cell value
 func (m *BrowserModel) showPreviewDialog() (tea.Model, tea.Cmd) {
+	active := m.activeResultSet()
 	row := m.results.SelectedRow()
-	if row == nil || m.currentResults == nil {
+	if row == nil || active == nil {
 		return m, nil
 	}
 
 	cursor := m.results.Cursor()
-	if cursor < 0 || cursor >= len(m.currentResults.Rows) {
+	if cursor < 0 || cursor >= len(active.Rows) {
 		return m, nil
 	}
 
@@ -1878,21 +1915,22 @@ func (m *BrowserModel) showPreviewDialog() (tea.Model, tea.Cmd) {
 
 // createDeleteQuery creates a DELETE SQL query for the selected row
 func (m *BrowserModel) createDeleteQuery() (tea.Model, tea.Cmd) {
-	if m.currentResults == nil || m.db == nil {
+	active := m.activeResultSet()
+	if active == nil || m.db == nil {
 		return m, nil
 	}
 
 	// Get selected row
 	rowIdx := m.results.Cursor()
-	if rowIdx < 0 || rowIdx >= len(m.currentResults.Rows) {
+	if rowIdx < 0 || rowIdx >= len(active.Rows) {
 		return m, nil
 	}
 
-	row := m.currentResults.Rows[rowIdx]
-	columns := m.currentResults.Columns
+	row := active.Rows[rowIdx]
+	columns := active.Columns
 
 	// Try to extract table name from the query
-	tableName := m.extractTableNameFromQuery(m.currentResults.Query)
+	tableName := m.extractTableNameFromQuery(active.Query)
 	if tableName == "" {
 		m.statusMsg = "Cannot determine table name from query"
 		return m, nil
@@ -1976,8 +2014,9 @@ func (m *BrowserModel) applyFilter() {
 	}
 
 	if m.resultsFilter == "" {
-		// Reset to original results
+		m.filteredResults = nil
 		m.updateResultsTable()
+		m.results.GotoTop()
 		return
 	}
 
@@ -2025,6 +2064,7 @@ func (m *BrowserModel) applyFilter() {
 	}
 
 	m.results.SetRows(rows)
+	m.results.GotoTop()
 }
 
 // normalizeBackground strips background color ANSI codes from text
@@ -2038,6 +2078,36 @@ func normalizeBackground(text string, bg color.Color) string {
 	normalized := bgColorPattern.ReplaceAllString(text, "")
 
 	return normalized
+}
+
+func highlightFilterMatch(text, filter string) string {
+	if filter == "" {
+		return text
+	}
+
+	lowerText := strings.ToLower(text)
+	lowerFilter := strings.ToLower(filter)
+	if lowerFilter == "" {
+		return text
+	}
+
+	highlight := lipgloss.NewStyle().Foreground(styles.BgDefault).Background(styles.Primary).Bold(true)
+
+	var out strings.Builder
+	start := 0
+	for {
+		idx := strings.Index(lowerText[start:], lowerFilter)
+		if idx == -1 {
+			out.WriteString(text[start:])
+			break
+		}
+		idx += start
+		out.WriteString(text[start:idx])
+		out.WriteString(highlight.Render(text[idx : idx+len(filter)]))
+		start = idx + len(filter)
+	}
+
+	return out.String()
 }
 
 // applyAutocompleteSuggestion applies the selected autocomplete suggestion
@@ -2189,7 +2259,8 @@ func (m *BrowserModel) renderResults() string {
 		return errContent
 	}
 
-	if m.currentResults == nil {
+	active := m.activeResultSet()
+	if active == nil {
 		emptyContent := fillerStyle.Render(lipgloss.NewStyle().Foreground(styles.TextMuted).Render("Results will appear here..."))
 		return emptyContent
 	}
@@ -2202,6 +2273,9 @@ func (m *BrowserModel) renderResults() string {
 		timeStr = fmt.Sprintf("%d ms", m.currentResults.ExecutionTime.Milliseconds())
 	}
 	infoText := fmt.Sprintf("Query returned %d rows in %s", m.currentResults.RowCount, timeStr)
+	if m.resultsFilter != "" {
+		infoText = fmt.Sprintf("Showing %d/%d rows in %s (filter: %s)", len(active.Rows), m.currentResults.RowCount, timeStr, m.resultsFilter)
+	}
 	// Make info line fill width with proper background
 	info := lipgloss.NewStyle().
 		Background(bg).
@@ -2224,7 +2298,8 @@ func (m *BrowserModel) renderResults() string {
 
 // renderTableWithColumnHighlight renders the table with the current column highlighted
 func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
-	if m.currentResults == nil || len(m.currentResults.Columns) == 0 {
+	active := m.activeResultSet()
+	if active == nil || len(active.Columns) == 0 {
 		return ""
 	}
 
@@ -2236,8 +2311,8 @@ func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
 	if cursorCol < 0 {
 		cursorCol = 0
 	}
-	if cursorCol >= len(m.currentResults.Columns) {
-		cursorCol = len(m.currentResults.Columns) - 1
+	if cursorCol >= len(active.Columns) {
+		cursorCol = len(active.Columns) - 1
 	}
 
 	// Define styles
@@ -2265,8 +2340,8 @@ func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
 		Padding(0, 1)
 
 	// Calculate column widths
-	colWidths := make([]int, len(m.currentResults.Columns))
-	for i, col := range m.currentResults.Columns {
+	colWidths := make([]int, len(active.Columns))
+	for i, col := range active.Columns {
 		colWidths[i] = lipgloss.Width(col) + 2 // +2 for padding
 		if colWidths[i] < 12 {
 			colWidths[i] = 12 // Minimum width
@@ -2314,8 +2389,8 @@ func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
 
 	// Build header - only show visible columns
 	var headerParts []string
-	for i := m.resultsScrollCol; i < endCol && i < len(m.currentResults.Columns); i++ {
-		colName := truncateString(m.currentResults.Columns[i], colWidths[i]-2)
+	for i := m.resultsScrollCol; i < endCol && i < len(active.Columns); i++ {
+		colName := truncateString(active.Columns[i], colWidths[i]-2)
 		headerParts = append(headerParts, headerStyle.Width(colWidths[i]).Render(colName))
 	}
 	header := lipgloss.NewStyle().Background(bg).Render(strings.Join(headerParts, ""))
@@ -2323,7 +2398,7 @@ func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
 	// Build rows
 	var rows []string
 	startIdx := 0
-	endIdx := len(m.currentResults.Rows)
+	endIdx := len(active.Rows)
 
 	// Only show visible rows (respect viewport)
 	visibleHeight := m.results.Height()
@@ -2333,8 +2408,8 @@ func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
 			startIdx = 0
 		}
 		endIdx = startIdx + visibleHeight
-		if endIdx > len(m.currentResults.Rows) {
-			endIdx = len(m.currentResults.Rows)
+		if endIdx > len(active.Rows) {
+			endIdx = len(active.Rows)
 			startIdx = endIdx - visibleHeight
 			if startIdx < 0 {
 				startIdx = 0
@@ -2342,12 +2417,12 @@ func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
 		}
 	}
 
-	for rowIdx := startIdx; rowIdx < endIdx && rowIdx < len(m.currentResults.Rows); rowIdx++ {
-		row := m.currentResults.Rows[rowIdx]
+	for rowIdx := startIdx; rowIdx < endIdx && rowIdx < len(active.Rows); rowIdx++ {
+		row := active.Rows[rowIdx]
 		var cellParts []string
 
 		// Only render visible columns
-		for colIdx := m.resultsScrollCol; colIdx < endCol && colIdx < len(m.currentResults.Columns); colIdx++ {
+		for colIdx := m.resultsScrollCol; colIdx < endCol && colIdx < len(active.Columns); colIdx++ {
 			if colIdx >= len(row) {
 				continue
 			}
@@ -2357,6 +2432,7 @@ func (m *BrowserModel) renderTableWithColumnHighlight(bg color.Color) string {
 			}
 			cellStr := fmt.Sprintf("%v", val)
 			cellStr = truncateString(cellStr, colWidths[colIdx]-2)
+			cellStr = highlightFilterMatch(cellStr, m.resultsFilter)
 
 			// Apply appropriate style
 			if rowIdx == cursorRow {
