@@ -31,7 +31,7 @@ nix run github:jupiterozeye/tornado
 tornado
 ```
 
-## Quick Demo
+## Demo
 
 ![Tornado Demo](https://raw.githubusercontent.com/jupiterozeye/tornado/main/docs/tornado-demo.gif)
 
