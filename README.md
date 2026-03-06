@@ -1,6 +1,8 @@
+
+![Tornado Gif](https://raw.githubusercontent.com/jupiterozeye/tornado/main/docs/tornado.gif)
+
 <div align="center">
 
-# Tornado
 
 [![Release](https://img.shields.io/github/v/release/jupiterozeye/tornado?style=flat-square)](https://github.com/jupiterozeye/tornado/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/jupiterozeye/tornado)](https://goreportcard.com/report/github.com/jupiterozeye/tornado)
@@ -8,8 +10,6 @@
 [![License](https://img.shields.io/github/license/jupiterozeye/tornado?style=flat-square)](LICENSE)
 
 </div>
-
-![Tornado Gif](https://raw.githubusercontent.com/jupiterozeye/tornado/main/docs/tornado.gif)
 
 ## Installation
 
