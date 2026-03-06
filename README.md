@@ -9,7 +9,7 @@
 
 </div>
 
-![Tornado Gif](https://raw.githubusercontent.com/jupiterozeye/tornado/docs/tornado.gif)
+![Tornado Gif](https://raw.githubusercontent.com/jupiterozeye/tornado/main/docs/tornado.gif)
 
 ## Installation
 
@@ -33,7 +33,7 @@ tornado
 
 ## Quick Demo
 
-![Tornado Demo](https://raw.githubusercontent.com/jupiterozeye/tornado/docs/tornado-demo.gif)
+![Tornado Demo](https://raw.githubusercontent.com/jupiterozeye/tornado/main/docs/tornado-demo.gif)
 
 ## Development
 
