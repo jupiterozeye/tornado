@@ -9,17 +9,18 @@
 
 </div>
 
-<!-- TODO: Add GIF demo here -->
-<!-- ![Demo](docs/demo.gif) -->
+![Tornado Gif](https://raw.githubusercontent.com/jupiterozeye/tornado/docs/tornado.gif)
 
 ## Installation
 
 **Go:**
+
 ```bash
 go install github.com/jupiterozeye/tornado/cmd/tornado@latest
 ```
 
 **Nix (flake):**
+
 ```bash
 nix run github:jupiterozeye/tornado
 ```
@@ -30,23 +31,9 @@ nix run github:jupiterozeye/tornado
 tornado
 ```
 
-## Quick Usage
+## Quick Demo
 
-- Start Tornado and connect to your database
-- Use the Explorer pane to browse tables
-- Run SQL from the Query pane
-- Inspect, filter (`/`), and copy from the Results pane
-
-## Common Keys
-
-- `space` open command menu
-- `e` focus Explorer
-- `q` focus Query
-- `r` focus Results
-- `ctrl+enter` execute query
-- `t` open theme picker (from command menu)
-- `?` help hints in status/footer
-- `q` quit (from command menu)
+![Tornado Demo](https://raw.githubusercontent.com/jupiterozeye/tornado/docs/tornado-demo.gif)
 
 ## Development
 
@@ -55,14 +42,3 @@ make deps
 make run
 make test
 ```
-
-## Tech Stack
-
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea)
-- [Bubbles](https://github.com/charmbracelet/bubbles)
-- [Lip Gloss](https://github.com/charmbracelet/lipgloss)
-- [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)
-
-## License
-
-MIT
