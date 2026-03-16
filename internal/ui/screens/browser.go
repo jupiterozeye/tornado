@@ -27,7 +27,6 @@ import (
 	"context"
 	"fmt"
 	"image/color"
-	"regexp"
 	"strings"
 	"time"
 
@@ -278,72 +277,79 @@ func NewBrowserModel(database db.Database) *BrowserModel {
 		cancel:        cancel,
 	}
 
-	// Load schema for autocomplete
-	go m.loadSchema()
-
 	return m
 }
 
-// loadSchema loads table and column names from the database
-func (m *BrowserModel) loadSchema() {
-	if m.db == nil {
-		return
-	}
+// SchemaLoadedMsg is sent when schema loading completes in the background.
+type SchemaLoadedMsg struct {
+	Tables  []string
+	Columns map[string][]string
+}
 
-	// Check context before starting
-	select {
-	case <-m.ctx.Done():
-		return
-	default:
-	}
+// ExplorerInitMsg is sent when the explorer has been initialized in the background.
+type ExplorerInitMsg struct {
+	Explorer *components.ExplorerModel
+	InnerMsg tea.Msg
+}
 
-	// Query for tables
-	result, err := m.db.Query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-	if err != nil {
-		return
-	}
-
-	// Check context after query
-	select {
-	case <-m.ctx.Done():
-		return
-	default:
-	}
-
-	var tables []string
-	for _, row := range result.Rows {
-		if len(row) > 0 && row[0] != nil {
-			tables = append(tables, row[0].(string))
+// loadSchemaCmd returns a tea.Cmd that loads the schema in a goroutine.
+func (m *BrowserModel) loadSchemaCmd() tea.Cmd {
+	db := m.db
+	ctx := m.ctx
+	return func() tea.Msg {
+		if db == nil {
+			return SchemaLoadedMsg{}
 		}
-	}
-	m.tables = tables
 
-	// Query for columns of each table
-	for _, table := range tables {
-		// Check context before each table query
+		// Check context before starting
 		select {
-		case <-m.ctx.Done():
-			return
+		case <-ctx.Done():
+			return SchemaLoadedMsg{}
 		default:
 		}
 
-		result, err := m.db.Query("PRAGMA table_info(" + table + ")")
+		// Use the Database interface instead of SQLite-specific SQL
+		tables, err := db.ListTables()
 		if err != nil {
-			continue
+			return SchemaLoadedMsg{}
 		}
-		var cols []string
-		for _, row := range result.Rows {
-			if len(row) > 1 && row[1] != nil {
-				cols = append(cols, row[1].(string))
+
+		// Check context after query
+		select {
+		case <-ctx.Done():
+			return SchemaLoadedMsg{}
+		default:
+		}
+
+		columns := make(map[string][]string)
+
+		// Query for columns of each table using the Database interface
+		for _, table := range tables {
+			// Check context before each table query
+			select {
+			case <-ctx.Done():
+				return SchemaLoadedMsg{Tables: tables, Columns: columns}
+			default:
 			}
+
+			schema, err := db.DescribeTable(table)
+			if err != nil {
+				continue
+			}
+			var cols []string
+			for _, col := range schema.Columns {
+				cols = append(cols, col.Name)
+			}
+			columns[table] = cols
 		}
-		m.columns[table] = cols
+
+		return SchemaLoadedMsg{Tables: tables, Columns: columns}
 	}
 }
 
 // Init returns the initial command for the browser screen.
 func (m *BrowserModel) Init() tea.Cmd {
-	return m.initExplorer()
+	return tea.Batch(m.initExplorer(), m.loadSchemaCmd())
 }
 
 // Update handles messages for the browser screen.
@@ -481,6 +487,15 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateFocus()
 		return m, nil
 
+	case SchemaLoadedMsg:
+		m.tables = msg.Tables
+		m.columns = msg.Columns
+		return m, nil
+
+	case ExplorerInitMsg:
+		m.explorer = msg.Explorer
+		return m, func() tea.Msg { return msg.InnerMsg }
+
 	case TriggerAutocompleteMsg:
 		// Only process if still in INSERT mode and focused on query
 		if m.focusedPane != PaneQuery || m.queryMode != QueryModeInsert {
@@ -603,21 +618,6 @@ func (m *BrowserModel) View() tea.View {
 	}
 
 	return view
-}
-
-func (m *BrowserModel) decoratePane(title, key, content string, paneWidth, paneHeight int) string {
-	innerWidth := paneWidth - 4   // borders + horizontal padding
-	innerHeight := paneHeight - 3 // borders + header row
-	if innerWidth < 1 {
-		innerWidth = 1
-	}
-	if innerHeight < 1 {
-		innerHeight = 1
-	}
-
-	header := m.styles.Muted.Render(fmt.Sprintf("(%s) %s", key, title))
-	body := clipText(content, innerWidth, innerHeight)
-	return lipgloss.JoinVertical(lipgloss.Left, header, body)
 }
 
 func (m *BrowserModel) renderPane(title, key, content string, paneWidth, paneHeight int, focused bool, bodyBg color.Color) string {
@@ -1429,10 +1429,13 @@ func truncateToWidth(s string, width int) string {
 // Helper methods
 
 func (m *BrowserModel) initExplorer() tea.Cmd {
+	db := m.db
+	lm := m.layoutManager
 	return func() tea.Msg {
-		_, _, w, h := m.layoutManager.GetExplorerBounds()
-		m.explorer = components.NewExplorerModel(m.db, w, h)
-		return m.explorer.Init()()
+		_, _, w, h := lm.GetExplorerBounds()
+		explorer := components.NewExplorerModel(db, w, h)
+		innerMsg := explorer.Init()()
+		return ExplorerInitMsg{Explorer: explorer, InnerMsg: innerMsg}
 	}
 }
 
@@ -1948,7 +1951,7 @@ func (m *BrowserModel) createDeleteQuery() (tea.Model, tea.Cmd) {
 		} else {
 			switch v := val.(type) {
 			case string:
-				conditions = append(conditions, fmt.Sprintf("%s = '%s'", col, v))
+				conditions = append(conditions, fmt.Sprintf("%s = '%s'", col, strings.ReplaceAll(v, "'", "''")))
 			default:
 				conditions = append(conditions, fmt.Sprintf("%s = %v", col, v))
 			}
@@ -1974,14 +1977,14 @@ func (m *BrowserModel) createDeleteQuery() (tea.Model, tea.Cmd) {
 
 // extractTableNameFromQuery attempts to extract the table name from a SELECT query
 func (m *BrowserModel) extractTableNameFromQuery(query string) string {
-	// Simple regex to extract table name from SELECT ... FROM table_name
-	query = strings.ToUpper(query)
-	fromIdx := strings.Index(query, "FROM ")
+	// Find FROM in uppercased copy but extract name from original string
+	upper := strings.ToUpper(query)
+	fromIdx := strings.Index(upper, "FROM ")
 	if fromIdx == -1 {
 		return ""
 	}
 
-	// Get everything after FROM
+	// Get everything after FROM from the original query
 	afterFrom := query[fromIdx+5:]
 	// Split on whitespace or punctuation to get just the table name
 	parts := strings.FieldsFunc(afterFrom, func(r rune) bool {
@@ -1989,7 +1992,7 @@ func (m *BrowserModel) extractTableNameFromQuery(query string) string {
 	})
 
 	if len(parts) > 0 {
-		return strings.ToLower(parts[0])
+		return parts[0]
 	}
 	return ""
 }
@@ -2065,19 +2068,6 @@ func (m *BrowserModel) applyFilter() {
 
 	m.results.SetRows(rows)
 	m.results.GotoTop()
-}
-
-// normalizeBackground strips background color ANSI codes from text
-// to prevent terminal color bleeding while preserving foreground colors
-func normalizeBackground(text string, bg color.Color) string {
-	// Regex to match ANSI background color codes (SGR 40-49, 100-109, or 48;5;n)
-	// This preserves foreground colors and other attributes
-	bgColorPattern := regexp.MustCompile(`\x1b\[(4[0-9]|10[0-9]|48;5;[0-9]+)m`)
-
-	// Remove background color codes
-	normalized := bgColorPattern.ReplaceAllString(text, "")
-
-	return normalized
 }
 
 func highlightFilterMatch(text, filter string) string {
@@ -2162,14 +2152,7 @@ func (m *BrowserModel) executeQuery() tea.Cmd {
 		startTime := time.Now()
 
 		// Try to determine if it's a query or exec
-		upperQuery := ""
-		for _, r := range query {
-			if r >= 'a' && r <= 'z' {
-				upperQuery += string(r - 32)
-			} else {
-				upperQuery += string(r)
-			}
-		}
+		upperQuery := strings.ToUpper(query)
 
 		// Check if it starts with SELECT, WITH, or EXPLAIN
 		isQuery := false
