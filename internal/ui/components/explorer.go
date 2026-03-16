@@ -367,6 +367,8 @@ func (m *ExplorerModel) expandOrLoad() tea.Cmd {
 			return m.loadTables()
 		case "Views":
 			return m.loadViews()
+		case "Indexes":
+			return m.loadIndexes()
 		case "Triggers":
 			return m.loadTriggers()
 		case "Sequences":
@@ -465,6 +467,24 @@ func (m *ExplorerModel) loadSequences() tea.Cmd {
 	}
 }
 
+func (m *ExplorerModel) loadIndexes() tea.Cmd {
+	return func() tea.Msg {
+		tables, err := m.db.ListTables()
+		if err != nil {
+			return IndexesLoadedMsg{Err: err}
+		}
+		var allIndexes []string
+		for _, table := range tables {
+			indexes, err := m.db.ListIndexes(table)
+			if err != nil {
+				continue
+			}
+			allIndexes = append(allIndexes, indexes...)
+		}
+		return IndexesLoadedMsg{Indexes: allIndexes}
+	}
+}
+
 func (m *ExplorerModel) loadColumns(tableName string) tea.Cmd {
 	return func() tea.Msg {
 		schema, err := m.db.DescribeTable(tableName)
@@ -515,7 +535,20 @@ func (m *ExplorerModel) updateViews(views []string) {
 }
 
 func (m *ExplorerModel) updateIndexes(indexes []string) {
-	// Indexes are loaded per-table, not globally
+	for _, category := range m.root.Children {
+		if category.Name == "Indexes" {
+			category.Children = nil
+			for _, indexName := range indexes {
+				category.Children = append(category.Children, &TreeNode{
+					Name:   indexName,
+					Type:   NodeIndex,
+					Parent: category,
+				})
+			}
+			category.Expanded = true
+			break
+		}
+	}
 	m.flattenTree()
 }
 

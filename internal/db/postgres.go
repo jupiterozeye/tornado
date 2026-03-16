@@ -40,6 +40,8 @@
 package db
 
 import (
+	"fmt"
+
 	"github.com/jupiterozeye/tornado/internal/models"
 )
 
@@ -124,7 +126,7 @@ func (p *PostgresDB) Connect(config models.ConnectionConfig) error {
 	// p.db = db
 	// return nil
 
-	return nil
+	return fmt.Errorf("PostgreSQL support is not yet implemented")
 }
 
 // Disconnect closes the PostgreSQL connection.

@@ -79,16 +79,15 @@ func (s *SQLiteDB) Disconnect() error {
 
 // IsConnected returns whether there's an active connection.
 func (s *SQLiteDB) IsConnected() bool {
-	switch s.connected {
-	case true:
-		return true
-	default:
-		return false
-	}
+	return s.connected
 }
 
 // Query executes a SELECT query and returns results.
 func (s *SQLiteDB) Query(sql string) (*models.QueryResult, error) {
+	if !s.connected || s.db == nil {
+		return nil, fmt.Errorf("not connected to database")
+	}
+
 	start := time.Now()
 
 	// Execute query
@@ -104,6 +103,9 @@ func (s *SQLiteDB) Query(sql string) (*models.QueryResult, error) {
 		return nil, err
 	}
 	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
 
 	// Extract type names for the result
 	typeNames := make([]string, len(columnTypes))
@@ -129,6 +131,9 @@ func (s *SQLiteDB) Query(sql string) (*models.QueryResult, error) {
 
 		results = append(results, values)
 
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return &models.QueryResult{
 		Columns:       columns,
@@ -206,11 +211,11 @@ func (s *SQLiteDB) ListSchemas() ([]string, error) {
 // DescribeTable returns column information for a table.
 func (s *SQLiteDB) DescribeTable(name string) (*models.TableSchema, error) {
 	if !s.connected || s.db == nil {
-		return nil, fmt.Errorf("not connected to databse")
+		return nil, fmt.Errorf("not connected to database")
 	}
 
-	// Query PRAMGA table_info
-	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", name))
+	// Query PRAGMA table_info
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(\"%s\")", name))
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +298,7 @@ func (s *SQLiteDB) ListIndexes(tableName string) ([]string, error) {
 		return nil, fmt.Errorf("not connected to database")
 	}
 
-	rows, err := s.db.Query(fmt.Sprintf("PRAGMA index_list(%s)", tableName))
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA index_list(\"%s\")", tableName))
 	if err != nil {
 		return nil, err
 	}

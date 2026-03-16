@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -281,7 +282,7 @@ func (m *AutocompleteModel) Render() string {
 		countLine := lipgloss.NewStyle().
 			Foreground(styles.TextMuted).
 			Background(styles.BgDark).
-			Render("... " + string(rune('0'+len(m.Suggestions)-maxDisplay)) + " more")
+			Render("... " + fmt.Sprintf("%d", len(m.Suggestions)-maxDisplay) + " more")
 		lines = append(lines, countLine)
 	}
 

@@ -77,7 +77,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.delegateToActiveScreen(msg)
 		}
 	case tea.WindowSizeMsg:
-		// Store dimensions for responsive lasyout
+		// Store dimensions for responsive layout
 		a.width = msg.Width
 		a.height = msg.Height
 		// Propagate to active screen

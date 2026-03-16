@@ -114,10 +114,10 @@ func Load() (*Config, error) {
 }
 
 // Save persists the configuration to disk.
-// Safe to call from outside the struct (acquires read lock).
+// Safe to call from outside the struct (acquires write lock).
 func (c *Config) Save() error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.saveUnlocked()
 }
 

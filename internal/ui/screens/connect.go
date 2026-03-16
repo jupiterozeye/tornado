@@ -103,7 +103,7 @@ func NewConnectModelWithConnections(connections []config.ConnectionEntry) *Conne
 func newConnectModelFromConnections(connections []config.ConnectionEntry) *ConnectModel {
 	s := styles.Default()
 
-	// Initialize spinner with custom parenthsis spinner
+	// Initialize spinner with custom parenthesis spinner
 	sp := spinner.New()
 	sp.Spinner = spinner.Spinner{
 		Frames: []string{"⎛", "⎜", "⎝", "⎞", "⎟", "⎠"},
@@ -223,6 +223,7 @@ func (m *ConnectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ConnectErrorMsg:
 		m.errorMsg = msg.Err
+		m.state = StateForm
 		return m, func() tea.Msg { return msg }
 	}
 
@@ -933,14 +934,6 @@ func (m *ConnectModel) renderTornadoAnimation() string {
 	return strings.Join(out, "\n")
 }
 
-func padToVisualWidth(s string, width int) string {
-	w := lipgloss.Width(s)
-	if w >= width {
-		return s
-	}
-	return s + strings.Repeat(" ", width-w)
-}
-
 func maxConnectInt(a, b int) int {
 	if a > b {
 		return a
@@ -1133,63 +1126,6 @@ func placeDialogBottomRight(background, dialog string, width, height int) string
 	}
 
 	return strings.Join(baseLines, "\n")
-}
-
-// spliceStringAt replaces characters in baseLine starting at column x with overlay content
-func spliceStringAt(baseLine, overlay string, x, totalWidth int) string {
-	if x >= totalWidth {
-		return baseLine
-	}
-
-	// Pad baseLine to totalWidth if needed
-	baseW := lipgloss.Width(baseLine)
-	if baseW < totalWidth {
-		baseLine += strings.Repeat(" ", totalWidth-baseW)
-	}
-
-	overlayW := lipgloss.Width(overlay)
-
-	// Build result: left part of base + overlay + right part of base
-	// Simple truncation without ellipsis for left part
-	leftPart := ""
-	w := 0
-	for _, r := range baseLine {
-		runeW := lipgloss.Width(string(r))
-		if w+runeW > x {
-			break
-		}
-		leftPart += string(r)
-		w += runeW
-	}
-	rightStart := x + overlayW
-	rightPart := ""
-	if rightStart < totalWidth {
-		// Get substring from rightStart to end
-		w := 0
-		start := 0
-		for _, r := range baseLine {
-			if w >= rightStart {
-				break
-			}
-			start++
-			w += lipgloss.Width(string(r))
-		}
-
-		result := ""
-		w = 0
-		for i, r := range baseLine {
-			if i >= start {
-				if w >= totalWidth-rightStart {
-					break
-				}
-				result += string(r)
-				w += lipgloss.Width(string(r))
-			}
-		}
-		rightPart = result
-	}
-
-	return leftPart + overlay + rightPart
 }
 
 func (m *ConnectModel) startConnection() tea.Cmd {
