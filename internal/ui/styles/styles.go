@@ -191,20 +191,6 @@ func Default() *Styles {
 	}
 }
 
-// Theme styles (pre-defined style sets)
-
-// DarkTheme returns styles optimized for dark terminal backgrounds.
-// TODO: Implement dark theme
-func DarkTheme() *Styles {
-	return Default()
-}
-
-// LightTheme returns styles optimized for light terminal backgrounds.
-// TODO: Implement light theme
-func LightTheme() *Styles {
-	return Default()
-}
-
 // Component style helpers
 
 // Box creates a bordered box style.

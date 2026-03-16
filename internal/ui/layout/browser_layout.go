@@ -1,9 +1,6 @@
 // Package layout provides responsive layout management for the browser screen.
 package layout
 
-import (
-	"charm.land/lipgloss/v2"
-)
 
 // Pane represents a UI pane with position and size
 type Pane int
@@ -70,59 +67,3 @@ func (l *Layout) GetResultsBounds() (x, y, width, height int) {
 	return x, y, width, height
 }
 
-// GetExplorerStyle returns the style for the Explorer pane with focus indicator
-func (l *Layout) GetExplorerStyle(focused bool) lipgloss.Style {
-	_, _, w, h := l.GetExplorerBounds()
-
-	borderColor := lipgloss.Color("238")
-	if focused {
-		borderColor = lipgloss.Color("99") // Purple when focused
-	}
-
-	return lipgloss.NewStyle().
-		Width(w).
-		Height(h).
-		MaxWidth(w).
-		MaxHeight(h).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Padding(0, 1)
-}
-
-// GetQueryStyle returns the style for the Query pane with focus indicator
-func (l *Layout) GetQueryStyle(focused bool) lipgloss.Style {
-	_, _, w, h := l.GetQueryBounds()
-
-	borderColor := lipgloss.Color("238")
-	if focused {
-		borderColor = lipgloss.Color("99")
-	}
-
-	return lipgloss.NewStyle().
-		Width(w).
-		Height(h).
-		MaxWidth(w).
-		MaxHeight(h).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Padding(0, 1)
-}
-
-// GetResultsStyle returns the style for the Results pane with focus indicator
-func (l *Layout) GetResultsStyle(focused bool) lipgloss.Style {
-	_, _, w, h := l.GetResultsBounds()
-
-	borderColor := lipgloss.Color("238")
-	if focused {
-		borderColor = lipgloss.Color("99")
-	}
-
-	return lipgloss.NewStyle().
-		Width(w).
-		Height(h).
-		MaxWidth(w).
-		MaxHeight(h).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Padding(0, 1)
-}

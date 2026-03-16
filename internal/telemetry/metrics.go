@@ -18,7 +18,6 @@ package telemetry
 
 import (
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"time"
@@ -58,6 +57,9 @@ func (r *RollingAverage) Add(value float64) {
 //
 // TODO: Implement
 func (r *RollingAverage) Average() float64 {
+	if r.size == 0 {
+		return 0
+	}
 	return r.sum / float64(r.size)
 }
 
@@ -146,6 +148,11 @@ func Histogram(values []float64, buckets int) ([]float64, []int) {
 		if v > max {
 			max = v
 		}
+	}
+
+	// Handle case where all values are identical
+	if min == max {
+		return []float64{min, min}, []int{len(values)}
 	}
 
 	// Create bucket boundaries
@@ -322,7 +329,3 @@ func (l *LatencyBuckets) Labels() []string {
 	return []string{"Quick", "Medium", "Slow", "V.Slow"}
 }
 
-// clamp ensures a value is within bounds.
-func clamp(value, minVal, maxVal float64) float64 {
-	return math.Max(minVal, math.Min(maxVal, value))
-}
