@@ -131,6 +131,9 @@ type BrowserModel struct {
 	}
 	yankBuffer string
 
+	// Pending normal-mode key for multi-key commands (gg, dd, yy)
+	pendingNormalKey string
+
 	// Context for cancelling background operations
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -529,6 +532,192 @@ func (m *BrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// renderHighlightedQuery renders the query editor content with SQL syntax highlighting
+// and a visible cursor, replacing the textarea's default View().
+func (m *BrowserModel) renderHighlightedQuery(width, height int) string {
+	if width < 1 || height < 1 {
+		return ""
+	}
+
+	text := m.query.Value()
+	lines := strings.Split(text, "\n")
+
+	cursorRow := m.query.Line()
+	cursorCol := m.query.Column()
+	scrollY := m.query.ScrollYOffset()
+
+	visibleEnd := scrollY + height
+	if visibleEnd > len(lines) {
+		visibleEnd = len(lines)
+	}
+
+	showCursor := m.focusedPane == PaneQuery
+	isVisual := m.queryMode == QueryModeVisual || m.queryMode == QueryModeVisualLine
+
+	// Compute visual selection range in absolute char indices
+	var selStart, selEnd int
+	if isVisual {
+		selStart, selEnd, _ = m.selectedQueryRange()
+	}
+
+	bgStyle := lipgloss.NewStyle().Background(styles.BgDark)
+	cursorLineBg := lipgloss.NewStyle().Background(styles.BgLight)
+	blockCursorStyle := lipgloss.NewStyle().Reverse(true)
+	insertCursorStyle := lipgloss.NewStyle().Foreground(styles.Text).Background(styles.BgDark)
+	visualStyle := lipgloss.NewStyle().Background(styles.PrimaryBg).Foreground(styles.TextBold)
+
+	var rendered []string
+
+	// Track block comment state from beginning through all lines before visible area
+	inBlockComment := false
+	for i := 0; i < scrollY && i < len(lines); i++ {
+		_, inBlockComment = components.HighlightSQL(lines[i], inBlockComment)
+	}
+
+	// Track cumulative char offset for visual selection mapping
+	lineStartIdx := 0
+	for i := 0; i < scrollY && i < len(lines); i++ {
+		lineStartIdx += len([]rune(lines[i])) + 1 // +1 for \n
+	}
+
+	for i := scrollY; i < visibleEnd; i++ {
+		line := lines[i]
+		lineRunes := []rune(line)
+		lineLen := len(lineRunes)
+		isCursorLine := showCursor && i == cursorRow
+		preLineComment := inBlockComment
+
+		highlighted, stillInComment := components.HighlightSQL(line, inBlockComment)
+		inBlockComment = stillInComment
+
+		// Check if this line has any visual selection
+		lineEndIdx := lineStartIdx + lineLen
+		hasSelection := isVisual && lineStartIdx < selEnd && lineEndIdx > selStart
+
+		if !isCursorLine && !hasSelection {
+			rendered = append(rendered, bgStyle.Render(padToWidth(highlighted, width)))
+			lineStartIdx = lineEndIdx + 1
+			continue
+		}
+
+		if hasSelection {
+			// Render line with visual selection highlighting
+			// Calculate which columns of this line are selected
+			selColStart := 0
+			if selStart > lineStartIdx {
+				selColStart = selStart - lineStartIdx
+			}
+			selColEnd := lineLen
+			if selEnd < lineEndIdx {
+				selColEnd = selEnd - lineStartIdx
+			}
+			if selColStart < 0 {
+				selColStart = 0
+			}
+			if selColEnd > lineLen {
+				selColEnd = lineLen
+			}
+
+			var parts string
+			bc := preLineComment
+			if selColStart > 0 {
+				var seg string
+				seg, bc = components.HighlightSQL(string(lineRunes[:selColStart]), bc)
+				parts += seg
+			}
+			if selColEnd > selColStart {
+				selText := string(lineRunes[selColStart:selColEnd])
+				parts += visualStyle.Render(selText)
+				_, bc = components.HighlightSQL(selText, bc)
+			}
+			if selColEnd < lineLen {
+				seg, _ := components.HighlightSQL(string(lineRunes[selColEnd:]), bc)
+				parts += seg
+			}
+			if lineLen == 0 {
+				// Empty selected line: show a highlighted space
+				parts = visualStyle.Render(" ")
+			}
+			rendered = append(rendered, bgStyle.Render(padToWidth(parts, width)))
+			lineStartIdx = lineEndIdx + 1
+			continue
+		}
+
+		// Cursor line rendering
+		if m.queryMode == QueryModeInsert {
+			// INSERT mode: thin bar cursor inserted between characters
+			if lineLen == 0 {
+				// Empty line: just show the bar cursor
+				bar := insertCursorStyle.Render("│")
+				rendered = append(rendered, cursorLineBg.Render(padToWidth(bar, width)))
+			} else {
+				col := cursorCol
+				if col < 0 {
+					col = 0
+				}
+				if col > lineLen {
+					col = lineLen
+				}
+				var beforeHL, afterHL string
+				bc := preLineComment
+				if col > 0 {
+					beforeHL, bc = components.HighlightSQL(string(lineRunes[:col]), bc)
+				}
+				bar := insertCursorStyle.Render("│")
+				if col < lineLen {
+					afterHL, _ = components.HighlightSQL(string(lineRunes[col:]), bc)
+				}
+				fullLine := padToWidth(beforeHL+bar+afterHL, width)
+				rendered = append(rendered, cursorLineBg.Render(fullLine))
+			}
+			lineStartIdx = lineEndIdx + 1
+			continue
+		}
+
+		// NORMAL mode: block cursor on the character
+		if lineLen == 0 {
+			cursorStr := blockCursorStyle.Background(styles.BgLight).Render(" ")
+			pad := ""
+			if width > 1 {
+				pad = cursorLineBg.Render(strings.Repeat(" ", width-1))
+			}
+			rendered = append(rendered, cursorStr+pad)
+			lineStartIdx = lineEndIdx + 1
+			continue
+		}
+
+		col := cursorCol
+		if col >= lineLen {
+			col = lineLen - 1
+		}
+		if col < 0 {
+			col = 0
+		}
+
+		var beforeHL, afterHL string
+		bc := preLineComment
+		if col > 0 {
+			beforeHL, bc = components.HighlightSQL(string(lineRunes[:col]), bc)
+		}
+		_, bc2 := components.HighlightSQL(string(lineRunes[col:col+1]), bc)
+		if col+1 < lineLen {
+			afterHL, _ = components.HighlightSQL(string(lineRunes[col+1:]), bc2)
+		}
+
+		cursorRendered := blockCursorStyle.Background(styles.BgLight).Render(string(lineRunes[col : col+1]))
+		fullLine := padToWidth(beforeHL+cursorRendered+afterHL, width)
+		rendered = append(rendered, cursorLineBg.Render(fullLine))
+		lineStartIdx = lineEndIdx + 1
+	}
+
+	// Pad remaining lines
+	for len(rendered) < height {
+		rendered = append(rendered, bgStyle.Render(strings.Repeat(" ", width)))
+	}
+
+	return strings.Join(rendered, "\n")
+}
+
 // View renders the browser screen.
 func (m *BrowserModel) View() tea.View {
 	if m.width == 0 || m.height == 0 {
@@ -560,10 +749,10 @@ func (m *BrowserModel) View() tea.View {
 		queryTitle = "Query [VISUAL LINE]"
 	}
 
-	// Wrap textarea in themed background to prevent terminal color bleeding
-	// The textarea output gets wrapped in a style that forces theme background on every cell
-	queryContent := m.query.View()
-	queryView := lipgloss.NewStyle().Background(styles.BgDark).Render(queryContent)
+	// Render query with SQL syntax highlighting
+	queryInnerW := maxInt(1, qw-4)
+	queryInnerH := maxInt(1, qh-3)
+	queryView := m.renderHighlightedQuery(queryInnerW, queryInnerH)
 	queryPane := m.renderPane(queryTitle, "q", queryView, qw, qh, m.focusedPane == PaneQuery, styles.BgDark)
 
 	// Render results
@@ -587,9 +776,10 @@ func (m *BrowserModel) View() tea.View {
 		case PaneExplorer:
 			main = m.renderPane("Explorer", "e", explorerContent, m.width, m.mainHeight(), m.focusedPane == PaneExplorer, styles.BgDefault)
 		case PaneQuery:
-			// Ensure textarea has proper background by wrapping in themed container
-			queryContent := lipgloss.NewStyle().Background(styles.BgDark).Render(m.query.View())
-			main = m.renderPane(queryTitle, "q", queryContent, m.width, m.mainHeight(), m.focusedPane == PaneQuery, styles.BgDark)
+			maxW := maxInt(1, m.width-4)
+			maxH := maxInt(1, m.mainHeight()-3)
+			maxQueryView := m.renderHighlightedQuery(maxW, maxH)
+			main = m.renderPane(queryTitle, "q", maxQueryView, m.width, m.mainHeight(), m.focusedPane == PaneQuery, styles.BgDark)
 		case PaneResults:
 			main = m.renderPane("Results", "r", resultsContent, m.width, m.mainHeight(), m.focusedPane == PaneResults, styles.BgDefault)
 		}
@@ -734,7 +924,7 @@ func (m *BrowserModel) renderContextFooter() string {
 		case QueryModeVisualLine:
 			text = "Query VISUAL LINE: y Yank  d Delete  c Change  >/< Indent  Esc→Normal"
 		default:
-			text = "Query NORMAL: i Insert  a Append  v Visual  V Visual Line  Enter Execute"
+			text = "Query NORMAL: i/a Insert  o Open  h/j/k/l Move  w/b Word  dd Del  yy Yank  p Paste  u Undo"
 		}
 	case PaneResults:
 		if m.resultsFilterActive {
@@ -1542,26 +1732,74 @@ func (m *BrowserModel) handleQueryKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 
 // handleQueryNormalMode handles keys in NORMAL mode
 func (m *BrowserModel) handleQueryNormalMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	// Mode switching
+	k := msg.String()
+
+	// Handle pending multi-key commands (gg, dd, yy)
+	if m.pendingNormalKey != "" {
+		pending := m.pendingNormalKey
+		m.pendingNormalKey = ""
+		m.statusMsg = ""
+		switch pending + k {
+		case "gg":
+			m.query.MoveToBegin()
+			return m, nil
+		case "dd":
+			m.deleteCurrentLine()
+			return m, nil
+		case "yy":
+			m.yankCurrentLine()
+			return m, nil
+		default:
+			// Invalid combo, ignore
+			return m, nil
+		}
+	}
+
+	switch k {
+	// === Mode switching ===
 	case "i":
 		m.queryMode = QueryModeInsert
 		m.query.Focus()
 		return m, nil
 	case "a":
+		// Append: move cursor one right, then insert
+		col := m.query.Column()
+		lines := strings.Split(m.query.Value(), "\n")
+		row := m.query.Line()
+		if row < len(lines) && col < len([]rune(lines[row])) {
+			m.query.SetCursorColumn(col + 1)
+		}
 		m.queryMode = QueryModeInsert
 		m.query.Focus()
 		return m, nil
 	case "I":
+		// Insert at beginning of line
+		m.query.CursorStart()
 		m.queryMode = QueryModeInsert
 		m.query.Focus()
 		return m, nil
 	case "A":
+		// Append at end of line
+		m.query.CursorEnd()
+		m.queryMode = QueryModeInsert
+		m.query.Focus()
+		return m, nil
+	case "o":
+		// Open line below
+		m.query.CursorEnd()
+		m.query.InsertString("\n")
+		m.queryMode = QueryModeInsert
+		m.query.Focus()
+		return m, nil
+	case "O":
+		// Open line above
+		m.query.CursorStart()
+		m.query.InsertString("\n")
+		m.query.CursorUp()
 		m.queryMode = QueryModeInsert
 		m.query.Focus()
 		return m, nil
 	case "v":
-		// Enter character-wise visual mode
 		m.queryMode = QueryModeVisual
 		m.visualStart.row = m.query.Line()
 		m.visualStart.col = m.query.Column()
@@ -1569,7 +1807,6 @@ func (m *BrowserModel) handleQueryNormalMode(msg tea.KeyPressMsg) (tea.Model, te
 		m.statusMsg = "-- VISUAL --"
 		return m, nil
 	case "V":
-		// Enter line-wise visual mode
 		m.queryMode = QueryModeVisualLine
 		m.visualStart.row = m.query.Line()
 		m.visualStart.col = 0
@@ -1577,25 +1814,283 @@ func (m *BrowserModel) handleQueryNormalMode(msg tea.KeyPressMsg) (tea.Model, te
 		m.statusMsg = "-- VISUAL LINE --"
 		return m, nil
 
-	// Execute query
+	// === Navigation ===
+	case "h", "left":
+		col := m.query.Column()
+		if col > 0 {
+			m.query.SetCursorColumn(col - 1)
+		}
+		return m, nil
+	case "j", "down":
+		m.query.CursorDown()
+		return m, nil
+	case "k", "up":
+		m.query.CursorUp()
+		return m, nil
+	case "l", "right":
+		col := m.query.Column()
+		lines := strings.Split(m.query.Value(), "\n")
+		row := m.query.Line()
+		if row < len(lines) && col < len([]rune(lines[row]))-1 {
+			m.query.SetCursorColumn(col + 1)
+		}
+		return m, nil
+	case "w":
+		m.wordForward()
+		return m, nil
+	case "b":
+		m.wordBackward()
+		return m, nil
+	case "0", "home":
+		m.query.CursorStart()
+		return m, nil
+	case "$", "end":
+		m.query.CursorEnd()
+		return m, nil
+	case "G":
+		m.query.MoveToEnd()
+		return m, nil
+	case "pgup":
+		m.query.PageUp()
+		return m, nil
+	case "pgdown":
+		m.query.PageDown()
+		return m, nil
+
+	// === Multi-key command starters ===
+	case "g":
+		m.pendingNormalKey = "g"
+		m.statusMsg = "g"
+		return m, nil
+	case "d":
+		m.pendingNormalKey = "d"
+		m.statusMsg = "d"
+		return m, nil
+	case "y":
+		m.pendingNormalKey = "y"
+		m.statusMsg = "y"
+		return m, nil
+
+	// === Editing ===
+	case "x":
+		m.deleteCharAtCursor()
+		return m, nil
+	case "p":
+		if m.yankBuffer != "" {
+			m.pasteAfter()
+		}
+		return m, nil
+	case "P":
+		if m.yankBuffer != "" {
+			m.pasteBefore()
+		}
+		return m, nil
+	case "u":
+		// Undo: pass ctrl+z to textarea
+		undoMsg := tea.KeyPressMsg(tea.KeyPressMsg{Mod: tea.ModCtrl, Code: 'z'})
+		m.query.Focus()
+		m.query, _ = m.query.Update(undoMsg)
+		m.query.Blur()
+		return m, nil
+
+	// === Execute query ===
 	case "enter":
 		return m, m.executeQuery()
-
-	// Navigation - pass through to textarea which handles these internally
-	case "up", "down", "left", "right",
-		"home", "end",
-		"pgup", "pgdown":
-		var cmd tea.Cmd
-		m.query, cmd = m.query.Update(msg)
-		return m, cmd
 
 	default:
 		return m, nil
 	}
 }
 
+// wordForward moves the cursor to the start of the next word.
+func (m *BrowserModel) wordForward() {
+	text := m.query.Value()
+	if text == "" {
+		return
+	}
+	runes := []rune(text)
+	idx := lineColToIndex(text, m.query.Line(), m.query.Column())
+	n := len(runes)
+
+	// Skip current word characters
+	for idx < n && !isWordBoundary(runes[idx]) {
+		idx++
+	}
+	// Skip whitespace/punctuation
+	for idx < n && isWordBoundary(runes[idx]) {
+		idx++
+	}
+
+	row, col := indexToLineCol(text, idx)
+	m.setQueryCursor(row, col)
+}
+
+// wordBackward moves the cursor to the start of the previous word.
+func (m *BrowserModel) wordBackward() {
+	text := m.query.Value()
+	if text == "" {
+		return
+	}
+	runes := []rune(text)
+	idx := lineColToIndex(text, m.query.Line(), m.query.Column())
+
+	if idx > len(runes) {
+		idx = len(runes)
+	}
+	// Move back past any whitespace/punctuation
+	for idx > 0 && isWordBoundary(runes[idx-1]) {
+		idx--
+	}
+	// Move back through word characters
+	for idx > 0 && !isWordBoundary(runes[idx-1]) {
+		idx--
+	}
+
+	row, col := indexToLineCol(text, idx)
+	m.setQueryCursor(row, col)
+}
+
+func isWordBoundary(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r' ||
+		r == ',' || r == ';' || r == '(' || r == ')' ||
+		r == '.' || r == '=' || r == '<' || r == '>' ||
+		r == '+' || r == '-' || r == '*' || r == '/' ||
+		r == '\'' || r == '"' || r == '[' || r == ']'
+}
+
+// deleteCharAtCursor deletes the character at the cursor (like vim 'x').
+func (m *BrowserModel) deleteCharAtCursor() {
+	text := m.query.Value()
+	if text == "" {
+		return
+	}
+	runes := []rune(text)
+	idx := lineColToIndex(text, m.query.Line(), m.query.Column())
+	if idx >= len(runes) {
+		return
+	}
+	newText := string(runes[:idx]) + string(runes[idx+1:])
+	m.query.SetValue(newText)
+	row, col := indexToLineCol(newText, idx)
+	m.setQueryCursor(row, col)
+}
+
+// deleteCurrentLine deletes the current line (like vim 'dd').
+func (m *BrowserModel) deleteCurrentLine() {
+	text := m.query.Value()
+	if text == "" {
+		return
+	}
+	lines := strings.Split(text, "\n")
+	row := m.query.Line()
+	if row >= len(lines) {
+		return
+	}
+
+	m.yankBuffer = lines[row] + "\n"
+
+	newLines := make([]string, 0, len(lines)-1)
+	newLines = append(newLines, lines[:row]...)
+	if row+1 < len(lines) {
+		newLines = append(newLines, lines[row+1:]...)
+	}
+
+	if len(newLines) == 0 {
+		m.query.SetValue("")
+		m.query.MoveToBegin()
+		return
+	}
+	m.query.SetValue(strings.Join(newLines, "\n"))
+	if row >= len(newLines) {
+		row = len(newLines) - 1
+	}
+	m.setQueryCursor(row, 0)
+}
+
+// yankCurrentLine copies the current line to the yank buffer (like vim 'yy').
+func (m *BrowserModel) yankCurrentLine() {
+	text := m.query.Value()
+	if text == "" {
+		return
+	}
+	lines := strings.Split(text, "\n")
+	row := m.query.Line()
+	if row >= len(lines) {
+		return
+	}
+	m.yankBuffer = lines[row] + "\n"
+	m.statusMsg = "1 line yanked"
+}
+
+// pasteAfter pastes the yank buffer after the cursor (like vim 'p').
+func (m *BrowserModel) pasteAfter() {
+	if m.yankBuffer == "" {
+		return
+	}
+	// If yank buffer ends with \n, it's a line yank — paste on line below
+	if strings.HasSuffix(m.yankBuffer, "\n") {
+		text := m.query.Value()
+		lines := strings.Split(text, "\n")
+		row := m.query.Line()
+		content := strings.TrimSuffix(m.yankBuffer, "\n")
+
+		newLines := make([]string, 0, len(lines)+1)
+		newLines = append(newLines, lines[:row+1]...)
+		newLines = append(newLines, content)
+		if row+1 < len(lines) {
+			newLines = append(newLines, lines[row+1:]...)
+		}
+		m.query.SetValue(strings.Join(newLines, "\n"))
+		m.setQueryCursor(row+1, 0)
+	} else {
+		// Character-wise paste after cursor
+		text := m.query.Value()
+		idx := lineColToIndex(text, m.query.Line(), m.query.Column())
+		if idx < len(text) {
+			idx++ // paste after
+		}
+		newText := text[:idx] + m.yankBuffer + text[idx:]
+		m.query.SetValue(newText)
+		row, col := indexToLineCol(newText, idx+len(m.yankBuffer)-1)
+		m.setQueryCursor(row, col)
+	}
+}
+
+// pasteBefore pastes the yank buffer before the cursor (like vim 'P').
+func (m *BrowserModel) pasteBefore() {
+	if m.yankBuffer == "" {
+		return
+	}
+	if strings.HasSuffix(m.yankBuffer, "\n") {
+		text := m.query.Value()
+		lines := strings.Split(text, "\n")
+		row := m.query.Line()
+		content := strings.TrimSuffix(m.yankBuffer, "\n")
+
+		newLines := make([]string, 0, len(lines)+1)
+		newLines = append(newLines, lines[:row]...)
+		newLines = append(newLines, content)
+		newLines = append(newLines, lines[row:]...)
+		m.query.SetValue(strings.Join(newLines, "\n"))
+		m.setQueryCursor(row, 0)
+	} else {
+		text := m.query.Value()
+		idx := lineColToIndex(text, m.query.Line(), m.query.Column())
+		newText := text[:idx] + m.yankBuffer + text[idx:]
+		m.query.SetValue(newText)
+		row, col := indexToLineCol(newText, idx+len(m.yankBuffer)-1)
+		m.setQueryCursor(row, col)
+	}
+}
+
 // handleQueryVisualMode handles keys in VISUAL mode
 func (m *BrowserModel) handleQueryVisualMode(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Helper to update visual end after cursor movement
+	updateEnd := func() {
+		m.visualEnd.row = m.query.Line()
+		m.visualEnd.col = m.query.Column()
+	}
+
 	switch msg.String() {
 	case "esc":
 		m.queryMode = QueryModeNormal
@@ -1610,6 +2105,10 @@ func (m *BrowserModel) handleQueryVisualMode(msg tea.KeyPressMsg) (tea.Model, te
 		m.statusMsg = "yanked"
 		return m, nil
 	case "d", "x":
+		selected := m.getSelectedQueryText()
+		if selected != "" {
+			m.yankBuffer = selected
+		}
 		m.deleteSelectedQueryText()
 		m.queryMode = QueryModeNormal
 		m.statusMsg = "deleted"
@@ -1634,13 +2133,59 @@ func (m *BrowserModel) handleQueryVisualMode(msg tea.KeyPressMsg) (tea.Model, te
 		m.queryMode = QueryModeInsert
 		m.query.Focus()
 		return m, nil
+
+	// Navigation — move cursor explicitly and extend selection
+	case "h", "left":
+		col := m.query.Column()
+		if col > 0 {
+			m.query.SetCursorColumn(col - 1)
+		}
+		updateEnd()
+		return m, nil
+	case "j", "down":
+		m.query.CursorDown()
+		updateEnd()
+		return m, nil
+	case "k", "up":
+		m.query.CursorUp()
+		updateEnd()
+		return m, nil
+	case "l", "right":
+		col := m.query.Column()
+		lines := strings.Split(m.query.Value(), "\n")
+		row := m.query.Line()
+		if row < len(lines) && col < len([]rune(lines[row]))-1 {
+			m.query.SetCursorColumn(col + 1)
+		}
+		updateEnd()
+		return m, nil
+	case "w":
+		m.wordForward()
+		updateEnd()
+		return m, nil
+	case "b":
+		m.wordBackward()
+		updateEnd()
+		return m, nil
+	case "0", "home":
+		m.query.CursorStart()
+		updateEnd()
+		return m, nil
+	case "$", "end":
+		m.query.CursorEnd()
+		updateEnd()
+		return m, nil
+	case "G":
+		m.query.MoveToEnd()
+		updateEnd()
+		return m, nil
+	case "g":
+		// gg in visual mode — move to beginning
+		m.query.MoveToBegin()
+		updateEnd()
+		return m, nil
 	default:
-		// Navigation extends selection
-		var cmd tea.Cmd
-		m.query, cmd = m.query.Update(msg)
-		m.visualEnd.row = m.query.Line()
-		m.visualEnd.col = m.query.Column()
-		return m, cmd
+		return m, nil
 	}
 }
 
@@ -1662,6 +2207,10 @@ func (m *BrowserModel) selectedQueryRange() (start, end int, ok bool) {
 	}
 	if start > end {
 		start, end = end, start
+	}
+	// Visual selection is inclusive of the character under the cursor
+	if m.queryMode == QueryModeVisual && end < len([]rune(text)) {
+		end++
 	}
 	if start == end {
 		return 0, 0, false
