@@ -1,3 +1,5 @@
+### IMPORTANT: THIS REPO HAS MIGRATED TO CODEBERG, AS MICROSOFT IS A TERRIBLE COMPANY THAT STEALS YOUR CODE. FOR NEWEST UPDATES PULL FROM THIS REMOTE:
+https://codeberg.org/ozeye/tornado
 
 ![Tornado Gif](https://raw.githubusercontent.com/jupiterozeye/tornado/main/docs/tornado.gif)
 
